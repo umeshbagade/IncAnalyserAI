@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Zap, ExternalLink } from 'lucide-react';
 import { mockIncident, mockFlowNodes, mockLiveEvents, mockEvidence, mockRCAResult, mockBestNextActions, flowDefinitions } from '@/data/mockData';
 import { FlowNode, LiveEvent, Evidence } from '@/types';
 import Header from '@/components/Header';
@@ -58,48 +57,13 @@ export default function IncidentDashboard() {
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[var(--background)] overflow-hidden">
-      {/* Top bar */}
-      <div className="h-10 bg-[var(--surface)] border-b border-[var(--border)] flex items-center gap-3 px-4 shrink-0">
-        <button
-          onClick={() => router.push('/')}
-          className="w-7 h-7 rounded-lg bg-[var(--surface-light)]/50 border border-[var(--border)] flex items-center justify-center hover:bg-[var(--surface-light)] transition-colors"
-        >
-          <ArrowLeft size={14} className="text-[var(--muted)]" />
-        </button>
-        <div className="w-6 h-6 rounded-md bg-[var(--accent)]/20 border border-[var(--accent)]/30 flex items-center justify-center">
-          <Zap size={12} className="text-[var(--accent)]" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-[var(--foreground)]">{incId}</span>
-            {incident && (
-              <>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                  incident.severity === 'HIGH' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-                  incident.severity === 'MEDIUM' ? 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20' :
-                  'text-green-400 bg-green-500/10 border-green-500/20'
-                }`}>
-                  {incident.severity}
-                </span>
-                <span className="text-[10px] text-[var(--muted)]">· Flow: {incident.flow}</span>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <button className="btn btn-ghost text-[10px] px-2 py-1">
-            <ExternalLink size={10} />
-            <span>Open in new tab</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Custom Header for Incident Page */}
+      {/* Header for Incident Page */}
       <Header
         incId={incId}
         flow={incident.flow}
         severity={incident.severity}
         duration={incident.duration}
+        onBack={() => router.push('/')}
       />
 
       {/* Main Dashboard Layout */}

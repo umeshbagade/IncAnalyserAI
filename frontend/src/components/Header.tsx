@@ -1,15 +1,17 @@
 'use client';
 
-import { Zap, Activity, Clock, TriangleAlert, Settings, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Zap, Activity, Clock, TriangleAlert, Settings, ChevronDown } from 'lucide-react';
+import ThemeToggle from './ThemeToggle';
 
 interface HeaderProps {
   incId: string;
   flow: string;
   severity: 'HIGH' | 'MEDIUM' | 'LOW';
   duration: string;
+  onBack?: () => void;
 }
 
-export default function Header({ incId, flow, severity, duration }: HeaderProps) {
+export default function Header({ incId, flow, severity, duration, onBack }: HeaderProps) {
   const severityColors = {
     HIGH: 'status-high',
     MEDIUM: 'status-medium',
@@ -19,6 +21,14 @@ export default function Header({ incId, flow, severity, duration }: HeaderProps)
   return (
     <header className="h-14 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between px-4 shrink-0">
       <div className="flex items-center gap-4">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="w-7 h-7 rounded-lg bg-[var(--surface-light)]/50 border border-[var(--border)] flex items-center justify-center hover:bg-[var(--surface-light)] transition-colors"
+          >
+            <ArrowLeft size={14} className="text-[var(--muted)]" />
+          </button>
+        )}
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-[var(--accent)]/20 border border-[var(--accent)]/30 flex items-center justify-center">
             <Zap size={14} className="text-[var(--accent)]" />
@@ -44,6 +54,7 @@ export default function Header({ incId, flow, severity, duration }: HeaderProps)
         </div>
       </div>
       <div className="flex items-center gap-2">
+        <ThemeToggle />
         <button className="btn btn-ghost text-xs">
           <TriangleAlert size={12} />
           Escalate

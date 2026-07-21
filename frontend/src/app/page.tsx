@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Zap, Search, ArrowRight, Activity, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 import { mockIncidentSummaries } from '@/data/mockData';
+import ThemeToggle from '@/components/ThemeToggle';
 
 interface IncidentRowData {
   id: string;
@@ -51,6 +52,7 @@ export default function HomePage() {
             <div className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
             <span>All Systems Operational</span>
           </div>
+          <ThemeToggle />
         </div>
       </header>
 
