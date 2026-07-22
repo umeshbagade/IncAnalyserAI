@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from .database import connect_to_mongo, close_mongo_connection, get_incidents_collection
 from .seed import seed_database
+from .enrich_data import enrich_missing_data
 from .models import (
     IncidentSummary,
     IncidentDetail,
@@ -50,10 +51,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    """Connect to MongoDB and seed data on startup."""
+    """Connect to MongoDB, seed data, and enrich missing fields on startup."""
     await connect_to_mongo()
     await seed_database()
-    print("🚀 IncAnalyserAI Backend ready (MongoDB connected & seeded)")
+    await enrich_missing_data()
+    print("🚀 IncAnalyserAI Backend ready (MongoDB connected, seeded & enriched)")
 
 
 @app.on_event("shutdown")
