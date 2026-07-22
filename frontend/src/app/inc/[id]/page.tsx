@@ -2,8 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { mockIncident, mockFlowNodes, mockLiveEvents, mockEvidence, mockRCAResult, mockBestNextActions, flowDefinitions } from '@/data/mockData';
-import { FlowNode, LiveEvent, Evidence } from '@/types';
+import { FlowNode, LiveEvent, Evidence, Incident, RCAResult, BestNextAction } from '@/types';
+import {
+  getIncidentDashboard,
+  getEvidence,
+  getIncidentEvents,
+  submitEvidenceFeedback,
+  DashboardResponse,
+} from '@/lib/api';
 import Header from '@/components/Header';
 import IncidentPanel from '@/components/IncidentPanel';
 import RCAPanel from '@/components/RCAPanel';
@@ -18,42 +24,93 @@ export default function IncidentDashboard() {
 
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [events, setEvents] = useState<LiveEvent[]>(mockLiveEvents);
-  const [evidenceList, setEvidenceList] = useState<Evidence[]>(mockEvidence);
+  const [events, setEvents] = useState<LiveEvent[]>([]);
+  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
+  const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
+  const [incident, setIncident] = useState<Incident | null>(null);
+  const [rcaResult, setRcaResult] = useState<RCAResult | null>(null);
+  const [bestNextActions, setBestNextActions] = useState<BestNextAction[]>([]);
   const [isConnected, setIsConnected] = useState(true);
-  const [eventCount, setEventCount] = useState(mockLiveEvents.length);
+  const [eventCount, setEventCount] = useState(0);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setAnalysisId(incId + '-' + Date.now().toString(36));
   }, [incId]);
 
-  // Get flow nodes based on incident flow or default
-  const flowKey = Object.keys(flowDefinitions).find(k => incId.includes(k)) || 'eod_reporting';
-  const flowNodes = flowDefinitions[flowKey] || mockFlowNodes;
+  // Fetch all dashboard data from backend
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      try {
+        const dashboard = await getIncidentDashboard(incId);
+        setIncident(dashboard.incident as Incident);
+        if (dashboard.flow) {
+          setFlowNodes(dashboard.flow.nodes as FlowNode[]);
+        }
+        setRcaResult(dashboard.rca as RCAResult);
+        setBestNextActions(dashboard.actions as BestNextAction[]);
+        setEvidenceList(dashboard.evidence as Evidence[]);
+        setEvents(dashboard.events as LiveEvent[]);
+        setEventCount(dashboard.events.length);
+      } catch (err) {
+        console.error('Failed to fetch incident dashboard:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [incId]);
 
-  // Get incident data
-  const incident = incId === 'INC-2026-07-20-001' ? mockIncident : {
-    ...mockIncident,
-    id: incId,
-    flow: flowKey,
-  };
+  // Refetch evidence when a node is selected
+  useEffect(() => {
+    if (!selectedNode) return;
+    async function fetchEvidence() {
+      try {
+        const res = await getEvidence(incId, selectedNode!.id);
+        setEvidenceList(res.evidence as Evidence[]);
+      } catch (err) {
+        console.error('Failed to fetch evidence:', err);
+      }
+    }
+    fetchEvidence();
+  }, [incId, selectedNode]);
 
   const handleNodeSelect = (node: FlowNode | null) => {
     setSelectedNode(node);
     setSelectedNodeId(node?.id || null);
   };
 
-  const handleEvidenceFeedback = (evidenceId: string, feedback: 'useful' | 'wrong') => {
-    setEvidenceList(prev =>
-      prev.map(e => e.id === evidenceId ? { ...e, feedback } : e)
-    );
+  const handleEvidenceFeedback = async (evidenceId: string, feedback: 'useful' | 'wrong') => {
+    try {
+      await submitEvidenceFeedback(incId, evidenceId, feedback);
+      setEvidenceList(prev =>
+        prev.map(e => e.id === evidenceId ? { ...e, feedback } : e)
+      );
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+    }
   };
 
   const handleClearEvents = () => {
     setEvents([]);
     setEventCount(0);
   };
+
+  if (loading || !incident) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[var(--background)]">
+        <div className="flex items-center gap-3 text-[var(--muted)]">
+          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm">Loading incident {incId}...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[var(--background)] overflow-hidden">
@@ -74,7 +131,9 @@ export default function IncidentDashboard() {
             <IncidentPanel incident={incident} selectedNode={selectedNode} />
           </div>
           <div className="overflow-y-auto max-h-[40%]">
-            <RCAPanel rcaResult={mockRCAResult} bestNextActions={mockBestNextActions} />
+            {rcaResult && (
+              <RCAPanel rcaResult={rcaResult} bestNextActions={bestNextActions} />
+            )}
           </div>
         </div>
 

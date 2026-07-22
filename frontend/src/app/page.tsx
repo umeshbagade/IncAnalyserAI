@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Zap, Search, ArrowRight, Activity, CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
-import { mockIncidentSummaries } from '@/data/mockData';
 import ThemeToggle from '@/components/ThemeToggle';
+import { getIncidents, getDashboardStats, IncidentListItem, IncidentStats } from '@/lib/api';
 
 interface IncidentRowData {
   id: string;
@@ -19,20 +19,35 @@ interface IncidentRowData {
 export default function HomePage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState('');
+  const [incidents, setIncidents] = useState<IncidentListItem[]>([]);
+  const [statusCounts, setStatusCounts] = useState<IncidentStats>({
+    total: 0, investigating: 0, resolved: 0, open: 0, high: 0,
+  });
+  const [loading, setLoading] = useState(true);
 
-  const filteredIncidents = mockIncidentSummaries.filter(inc =>
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [incRes, stats] = await Promise.all([
+          getIncidents(),
+          getDashboardStats(),
+        ]);
+        setIncidents(incRes.incidents);
+        setStatusCounts(stats);
+      } catch (err) {
+        console.error('Failed to fetch incidents:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const filteredIncidents = incidents.filter(inc =>
     inc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
     inc.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     inc.flow.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const statusCounts = {
-    total: mockIncidentSummaries.length,
-    investigating: mockIncidentSummaries.filter(i => i.status === 'investigating').length,
-    resolved: mockIncidentSummaries.filter(i => i.status === 'resolved').length,
-    open: mockIncidentSummaries.filter(i => i.status === 'open').length,
-    high: mockIncidentSummaries.filter(i => i.severity === 'HIGH').length,
-  };
 
   return (
     <div className="min-h-screen bg-[var(--background)]">

@@ -132,7 +132,7 @@ IncAnalyserAI/
 │   │   │   ├── FlowDAG.tsx       # Center DAG visualization
 │   │   │   ├── LiveEventStream.tsx # SSE event stream
 │   │   │   └── EvidencePanel.tsx # Right panel
-│   │   ├── data/mockData.ts      # Mock incident data
+│   │   └── lib/api.ts            # API client (proxies to backend via Next.js rewrites)
 │   │   └── types.ts              # TypeScript interfaces
 │   ├── package.json
 │   ├── tsconfig.json

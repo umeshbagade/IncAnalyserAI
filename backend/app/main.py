@@ -1,22 +1,58 @@
 """
 IncAnalyserAI Backend - FastAPI Application
-Provides REST APIs + SSE streaming for the incident analysis platform.
-All data is static/mocked for hackathon purposes.
+Fully in sync with frontend UI (Next.js + TypeScript types).
+All mock data matches frontend/mockData.ts exactly.
+
+API Endpoints (10 total):
+  1. GET  /                           - Service info
+  2. GET  /health                     - Health check
+  3. GET  /api/incidents              - List incident summaries (for Home Dashboard)
+  4. GET  /api/incidents/{inc_id}     - Full incident details (for Incident Page)
+  5. GET  /api/incidents/{inc_id}/flow       - Flow DAG definition
+  6. GET  /api/incidents/{inc_id}/rca        - RCA result
+  7. GET  /api/incidents/{inc_id}/actions    - Best next actions
+  8. GET  /api/incidents/{inc_id}/evidence   - Evidence for a specific flow node
+  9. GET  /api/incidents/{inc_id}/events     - Live events
+  10. POST /api/incidents/{inc_id}/feedback   - Submit evidence feedback
 """
 
-import asyncio
 import json
 import uuid
-import random
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import JSONResponse
 
-# ─── App Setup ───────────────────────────────────────────────────────────────
+from .models import (
+    IncidentSummary,
+    Incident,
+    FlowNode,
+    FlowDefinition,
+    Evidence,
+    RCAResult,
+    BestNextAction,
+    LiveEvent,
+    InvestigationRequest,
+    EvidenceFeedbackRequest,
+    RCAFeedbackRequest,
+    ApproveRequest,
+)
+from .data import (
+    INCIDENT_SUMMARIES,
+    INCIDENTS,
+    FLOW_DEFINITIONS,
+    EVIDENCE_BY_FLOW,
+    RCA_RESULTS,
+    BEST_NEXT_ACTIONS,
+    LIVE_EVENTS,
+    get_flow_for_incident,
+    get_default_rca,
+    get_default_actions,
+)
+
+# ─── App Setup ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="IncAnalyserAI API",
@@ -32,571 +68,392 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Models ──────────────────────────────────────────────────────────────────
+# In-memory store for feedback
+FEEDBACK_STORE: dict[str, list] = {}
+APPROVAL_STORE: dict[str, dict] = {}
 
-class InvestigationRequest(BaseModel):
-    incident_id: str
-    description: Optional[str] = None
-
-class InvestigationState(BaseModel):
-    run_id: str
-    incident_id: str
-    status: str = "running"  # running | completed | failed
-    current_phase: str = "saturn"
-    progress: float = 0.0
-    phases: dict = {}
-
-class FeedbackRequest(BaseModel):
-    step_id: str
-    feedback: str  # "useful" | "wrong"
-    comment: Optional[str] = None
-
-class ApproveRequest(BaseModel):
-    approved: bool = True
-    comment: Optional[str] = None
-
-class FlowNode(BaseModel):
-    id: str
-    label: str
-    status: str  # pending | active | completed | error | skipped
-    description: str
-    sub_steps: list[dict] = []
-
-class PhaseInfo(BaseModel):
-    node_id: str
-    label: str
-    status: str
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-
-# ─── Mock Data ──────────────────────────────────────────────────────────────
-
-INVESTIGATIONS: dict[str, dict] = {}
-
-FLOW_DEFINITIONS = {
-    "eod_reporting": {
-        "id": "eod_reporting",
-        "name": "EOD Reporting Pipeline",
-        "nodes": [
-            {
-                "id": "saturn",
-                "label": "Saturn",
-                "status": "completed",
-                "description": "Report Level - Check report count & status",
-                "sub_steps": [
-                    {"id": "s1", "label": "Report Count Check", "status": "completed"},
-                    {"id": "s2", "label": "Status Verification", "status": "completed"},
-                    {"id": "s3", "label": "Anomaly Detection", "status": "completed"},
-                ],
-            },
-            {
-                "id": "datahub",
-                "label": "Data Hub",
-                "status": "active",
-                "description": "Data Layer - Query feeds & data sources",
-                "sub_steps": [
-                    {"id": "d1", "label": "Feed Status Query", "status": "completed"},
-                    {"id": "d2", "label": "Data Source Verification", "status": "active"},
-                    {"id": "d3", "label": "Data Quality Check", "status": "pending"},
-                ],
-            },
-            {
-                "id": "ingestion",
-                "label": "Ingestion",
-                "status": "pending",
-                "description": "Ingestion Layer - Check connectivity & pipelines",
-                "sub_steps": [
-                    {"id": "i1", "label": "SFTP Connection Test", "status": "pending"},
-                    {"id": "i2", "label": "Pipeline Status", "status": "pending"},
-                    {"id": "i3", "label": "Retry Mechanism", "status": "pending"},
-                ],
-            },
-        ],
-        "fallback_phases": ["saturn", "datahub", "ingestion"],
-        "rca": {
-            "root_cause": "Vendor SFTP server timeout - upstream data source unavailable due to network partition",
-            "confidence": 0.87,
-            "causal_chain": [
-                "Vendor SFTP server unresponsive (timeout after 900s)",
-                'Feed "load_feed_alpha" failed to ingest data',
-                "5 reports missing in Saturn: daily_pnl, risk_summary, exposure_report, var_calc, limit_check",
-                "EOD batch reporting pipeline halted at DataHub stage",
-                "SLA breach probability: 0.92 - escalation triggered",
-            ],
-        },
-        "evidence": [
-            {
-                "id": "e1",
-                "type": "tool_call",
-                "content": "airflow_get_dag_run",
-                "status": "failed",
-                "details": "status: FAILED\nfailed_tasks: [load_feed_alpha]",
-            },
-            {
-                "id": "e2",
-                "type": "runbook",
-                "content": "rb_ingest_sftp_timeout.md",
-                "status": "success",
-                "details": "Runbook: SFTP timeout recovery procedure\nSteps: 1-5 applicable",
-            },
-            {
-                "id": "e3",
-                "type": "similar_incident",
-                "content": "INC-2026-05-10",
-                "status": "success",
-                "details": "Similar SFTP timeout incident\nResolution: Vendor failover triggered",
-            },
-        ],
-        "next_actions": [
-            {"id": "b1", "label": "Rerun Airflow", "action": "airflow_rerun", "category": "rerun"},
-            {"id": "b2", "label": "Recompute snapshot", "action": "recompute_snapshot", "category": "recompute"},
-            {"id": "b3", "label": "Notify vendor", "action": "notify_vendor", "category": "notify"},
-            {"id": "b4", "label": "Check backup feed", "action": "check_backup_feed", "category": "investigate"},
-        ],
-    },
-    "risk_calc_pipeline": {
-        "id": "risk_calc_pipeline",
-        "name": "Risk Calculation Pipeline",
-        "nodes": [
-            {
-                "id": "saturn",
-                "label": "Saturn",
-                "status": "error",
-                "description": "Report Level - Check calculations",
-                "sub_steps": [
-                    {"id": "s1", "label": "VaR Calculation Check", "status": "completed"},
-                    {"id": "s2", "label": "Limit Check", "status": "error"},
-                    {"id": "s3", "label": "Exposure Report", "status": "pending"},
-                ],
-            },
-            {
-                "id": "datahub",
-                "label": "Data Hub",
-                "status": "pending",
-                "description": "Data Layer - Risk data sources",
-                "sub_steps": [
-                    {"id": "d1", "label": "Market Data Query", "status": "pending"},
-                    {"id": "d2", "label": "Position Data", "status": "pending"},
-                    {"id": "d3", "label": "Risk Factors", "status": "pending"},
-                ],
-            },
-            {
-                "id": "ingestion",
-                "label": "Ingestion",
-                "status": "pending",
-                "description": "Ingestion Layer - Pipeline check",
-                "sub_steps": [
-                    {"id": "i1", "label": "Pipeline Health", "status": "pending"},
-                    {"id": "i2", "label": "Data Quality", "status": "pending"},
-                    {"id": "i3", "label": "Retry", "status": "pending"},
-                ],
-            },
-        ],
-        "rca": {
-            "root_cause": "Position data feed stale - market data provider delayed by 45 minutes",
-            "confidence": 0.82,
-            "causal_chain": [
-                "Market data provider experienced latency spike",
-                "Position data feed 45 minutes stale",
-                "VaR calculation using outdated positions",
-                "Limit check triggered breach incorrectly",
-                "Risk report generation halted",
-            ],
-        },
-        "evidence": [],
-        "next_actions": [],
-    },
-}
-
-MOCK_INCIDENTS = {
-    "INC-2026-07-20-001": {
-        "id": "INC-2026-07-20-001",
-        "title": "EOD Reporting Failure - Feed Load Timeout",
-        "severity": "HIGH",
-        "status": "investigating",
-        "flow": "eod_reporting",
-        "timestamp": "2026-07-20 21:01:00",
-        "duration": "00:14:23",
-        "description": "EOD batch job failed at 21:01 UTC. Feed 'load_feed_alpha' timed out after 900 seconds.",
-        "triage_summary": "EOD reporting pipeline halted at Saturn stage. Feed load timeout in DataHub ingestion layer.",
-    },
-    "INC-2026-07-19-003": {
-        "id": "INC-2026-07-19-003",
-        "title": "Risk Calculation Pipeline Failure",
-        "severity": "HIGH",
-        "status": "investigating",
-        "flow": "risk_calc_pipeline",
-        "timestamp": "2026-07-19 14:30:00",
-        "duration": "00:42:10",
-        "description": "Risk calculation pipeline failed during VaR computation.",
-        "triage_summary": "Suspected stale market data causing incorrect risk calculations.",
-    },
-    "INC-2026-07-18-007": {
-        "id": "INC-2026-07-18-007",
-        "title": "Market Data Feed Stale",
-        "severity": "MEDIUM",
-        "status": "resolved",
-        "flow": "market_data_ingest",
-        "timestamp": "2026-07-18 09:15:00",
-        "duration": "01:23:45",
-        "description": "Market data feed stale for 45 minutes.",
-        "triage_summary": "Primary feed had connectivity issues. Failed over to backup.",
-    },
-}
-
-# ─── SSE Event Generator ─────────────────────────────────────────────────────
-
-async def generate_investigation_events(run_id: str):
-    """Generate SSE events simulating the investigation workflow with 2s per step."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        yield f"event: error\ndata: {json.dumps({'error': 'Investigation not found'})}\n\n"
-        return
-
-    flow_id = investigation.get("flow", "eod_reporting")
-    flow_def = FLOW_DEFINITIONS.get(flow_id, FLOW_DEFINITIONS["eod_reporting"])
-    nodes = flow_def["nodes"]
-    all_steps = []
-    for node in nodes:
-        for step in node["sub_steps"]:
-            all_steps.append({"node_id": node["id"], "node_label": node["label"], **step})
-
-    step_index = investigation.get("step_index", 0)
-    all_steps = all_steps[step_index:]
-
-    event_id = 1
-    phase_order = ["saturn", "datahub", "ingestion"]
-
-    for phase_idx, phase_id in enumerate(phase_order):
-        phase_node = next((n for n in nodes if n["id"] == phase_id), None)
-        if not phase_node:
-            continue
-
-        # Phase start event
-        phase_event = {
-            "type": "phase.start",
-            "phase": phase_id,
-            "phase_label": phase_node["label"],
-            "phase_index": phase_idx + 1,
-            "total_phases": len(phase_order),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        yield f"id: {event_id}\nevent: phase.start\ndata: {json.dumps(phase_event)}\n\n"
-        event_id += 1
-        await asyncio.sleep(2)
-
-        # Execute sub-steps for this phase
-        phase_steps = [s for s in all_steps if s["node_id"] == phase_id]
-        for step in phase_steps:
-            # Simulate step execution
-            step_status = "completed" if random.random() > 0.15 else "error"
-            step_event = {
-                "type": "step.done",
-                "step_id": step["id"],
-                "step_label": step["label"],
-                "phase": phase_id,
-                "phase_label": phase_node["label"],
-                "status": step_status,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            yield f"id: {event_id}\nevent: step.done\ndata: {json.dumps(step_event)}\n\n"
-            event_id += 1
-            investigation["step_index"] = investigation.get("step_index", 0) + 1
-            await asyncio.sleep(2)
-
-            # If step failed, mark entire phase as error and break flow
-            if step_status == "error":
-                fail_event = {
-                    "type": "phase.failed",
-                    "phase": phase_id,
-                    "phase_label": phase_node["label"],
-                    "failed_step": step["label"],
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-                yield f"id: {event_id}\nevent: phase.failed\ndata: {json.dumps(fail_event)}\n\n"
-                event_id += 1
-
-                # Mark investigation as failed
-                investigation["status"] = "failed"
-                investigation["failed_at"] = phase_id
-                investigation["failed_step"] = step["id"]
-
-                # Send RCA ready with limited info
-                rca_event = {
-                    "type": "rca.ready",
-                    "status": "partial",
-                    "root_cause": f"Investigation halted at {phase_node['label']} - step '{step['label']}' failed",
-                    "confidence": 0.65,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-                yield f"id: {event_id}\nevent: rca.ready\ndata: {json.dumps(rca_event)}\n\n"
-                event_id += 1
-                return
-
-        # Phase completed
-        phase_done_event = {
-            "type": "phase.completed",
-            "phase": phase_id,
-            "phase_label": phase_node["label"],
-            "phase_index": phase_idx + 1,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        yield f"id: {event_id}\nevent: phase.completed\ndata: {json.dumps(phase_done_event)}\n\n"
-        event_id += 1
-
-        # If there's a next phase, send transition
-        if phase_idx < len(phase_order) - 1:
-            next_phase = phase_order[phase_idx + 1]
-            next_node = next((n for n in nodes if n["id"] == next_phase), None)
-            transition_event = {
-                "type": "phase.transition",
-                "from": phase_id,
-                "to": next_phase,
-                "to_label": next_node["label"] if next_node else next_phase,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            yield f"id: {event_id}\nevent: phase.transition\ndata: {json.dumps(transition_event)}\n\n"
-            event_id += 1
-
-    # All phases completed successfully
-    investigation["status"] = "completed"
-
-    # Send plan ready
-    plan_event = {
-        "type": "plan.ready",
-        "steps": len(all_steps),
-        "phases": len(phase_order),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"id: {event_id}\nevent: plan.ready\ndata: {json.dumps(plan_event)}\n\n"
-    event_id += 1
-
-    # Send triage done
-    triage_event = {
-        "type": "triage.done",
-        "incident_id": investigation["incident_id"],
-        "summary": f"Investigation complete for {investigation['incident_id']}. All phases analyzed.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"id: {event_id}\nevent: triage.done\ndata: {json.dumps(triage_event)}\n\n"
-    event_id += 1
-
-    # Send RCA ready
-    rca = flow_def.get("rca", {})
-    rca_event = {
-        "type": "rca.ready",
-        "status": "complete",
-        "root_cause": rca.get("root_cause", "No root cause identified"),
-        "confidence": rca.get("confidence", 0.5),
-        "causal_chain": rca.get("causal_chain", []),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"id: {event_id}\nevent: rca.ready\ndata: {json.dumps(rca_event)}\n\n"
-    event_id += 1
-
-    # Completion event
-    complete_event = {
-        "type": "investigation.complete",
-        "run_id": run_id,
-        "status": "completed",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    yield f"id: {event_id}\nevent: investigation.complete\ndata: {json.dumps(complete_event)}\n\n"
-
-
-# ─── API Routes ──────────────────────────────────────────────────────────────
+# ─── API Routes ─────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
-    return {"service": "IncAnalyserAI API", "version": "0.1.0", "status": "operational"}
+    """Service info."""
+    return {
+        "service": "IncAnalyserAI API",
+        "version": "0.1.0",
+        "status": "operational",
+        "endpoints": [
+            "GET  /",
+            "GET  /health",
+            "GET  /api/incidents",
+            "GET  /api/incidents/{inc_id}",
+            "GET  /api/incidents/{inc_id}/flow",
+            "GET  /api/incidents/{inc_id}/rca",
+            "GET  /api/incidents/{inc_id}/actions",
+            "GET  /api/incidents/{inc_id}/evidence",
+            "GET  /api/incidents/{inc_id}/events",
+            "POST /api/incidents/{inc_id}/feedback",
+        ],
+    }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-
-@app.post("/incidents")
-async def start_investigation(request: InvestigationRequest):
-    """Start a new incident investigation. Returns a run_id."""
-    run_id = f"run-{uuid.uuid4().hex[:12]}"
-
-    # Find matching flow
-    flow_id = "eod_reporting"
-    for key in FLOW_DEFINITIONS:
-        if key in request.incident_id.lower() or key in (request.description or "").lower():
-            flow_id = key
-            break
-
-    INVESTIGATIONS[run_id] = {
-        "run_id": run_id,
-        "incident_id": request.incident_id,
-        "flow": flow_id,
-        "status": "running",
-        "step_index": 0,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+    """Health check endpoint."""
     return {
-        "run_id": run_id,
-        "incident_id": request.incident_id,
-        "flow": flow_id,
-        "status": "running",
-        "message": f"Investigation started for {request.incident_id}",
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
-@app.get("/incidents/{run_id}")
-async def get_investigation_state(run_id: str):
-    """Get the current state of an investigation (polling fallback)."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+# ═══════════════════════════════════════════════════════════════════════════
+#  INCIDENT ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
 
-    flow_def = FLOW_DEFINITIONS.get(investigation.get("flow", "eod_reporting"), FLOW_DEFINITIONS["eod_reporting"])
-
+@app.get("/api/incidents", response_model=dict)
+async def list_incidents():
+    """
+    GET /api/incidents
+    Returns all incident summaries for the Home Dashboard page.
+    Matches mockIncidentSummaries in frontend/src/data/mockData.ts
+    """
     return {
-        "run_id": run_id,
-        "incident_id": investigation["incident_id"],
-        "status": investigation["status"],
-        "flow": investigation["flow"],
-        "flow_definition": flow_def,
-        "progress": calculate_progress(investigation, flow_def),
-        "created_at": investigation["created_at"],
-    }
-
-
-@app.get("/incidents/{run_id}/stream")
-async def stream_investigation(run_id: str):
-    """SSE endpoint: streams live events as the investigation graph executes."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
-
-    return StreamingResponse(
-        generate_investigation_events(run_id),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
+        "incidents": INCIDENT_SUMMARIES,
+        "total": len(INCIDENT_SUMMARIES),
+        "counts": {
+            "total": len(INCIDENT_SUMMARIES),
+            "investigating": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "investigating"),
+            "resolved": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "resolved"),
+            "open": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "open"),
+            "high": sum(1 for i in INCIDENT_SUMMARIES if i["severity"] == "HIGH"),
         },
-    )
+    }
 
 
-@app.post("/incidents/{run_id}/feedback")
-async def submit_feedback(run_id: str, feedback: FeedbackRequest):
-    """Submit feedback for a specific step in the investigation."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+@app.get("/api/incidents/{inc_id}", response_model=dict)
+async def get_incident(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}
+    Returns full incident details for the Incident Detail page.
+    Matches mockIncident in frontend/src/data/mockData.ts
+    Returns:
+      - id, title, severity, status, flow, timestamp, duration
+      - originalText, triageSummary
+      - entities: [{name, type, confidence}]
+      - timeline: [{time, event, type}]
+    """
+    incident = INCIDENTS.get(inc_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
 
-    if "feedback" not in investigation:
-        investigation["feedback"] = []
+    return incident
 
-    investigation["feedback"].append({
-        "step_id": feedback.step_id,
-        "feedback": feedback.feedback,
-        "comment": feedback.comment,
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  FLOW DAG ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/flow", response_model=dict)
+async def get_incident_flow(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}/flow
+    Returns the Flow DAG definition for the incident.
+    Used by FlowDAG component.
+    Matches flowDefinitions in frontend/src/data/mockData.ts
+    Returns: { flowId, flowName, nodes: [FlowNode] }
+    """
+    flow_id = get_flow_for_incident(inc_id)
+    flow_def = FLOW_DEFINITIONS.get(flow_id)
+
+    if not flow_def:
+        raise HTTPException(status_code=404, detail=f"Flow definition not found for incident '{inc_id}'")
+
+    return {
+        "flowId": flow_def["id"],
+        "flowName": flow_def["name"],
+        "nodes": flow_def["nodes"],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RCA ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/rca", response_model=dict)
+async def get_incident_rca(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}/rca
+    Returns Root Cause Analysis result.
+    Used by RCAPanel component.
+    Matches mockRCAResult in frontend/src/data/mockData.ts
+    Returns: { rootCause, confidence, causalChain: [string] }
+    """
+    flow_id = get_flow_for_incident(inc_id)
+    rca = RCA_RESULTS.get(flow_id, get_default_rca())
+    return {
+        "rootCause": rca["rootCause"],
+        "confidence": rca["confidence"],
+        "causalChain": rca["causalChain"],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  BEST NEXT ACTIONS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/actions", response_model=dict)
+async def get_incident_actions(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}/actions
+    Returns Best Next Actions for the incident.
+    Used by RCAPanel component.
+    Matches mockBestNextActions in frontend/src/data/mockData.ts
+    Returns: { actions: [{id, label, action, category}] }
+    """
+    flow_id = get_flow_for_incident(inc_id)
+    actions = BEST_NEXT_ACTIONS.get(flow_id, get_default_actions())
+    return {"actions": actions}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  EVIDENCE ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/evidence", response_model=dict)
+async def get_incident_evidence(
+    inc_id: str,
+    node_id: Optional[str] = Query(None, description="Filter evidence by flow node ID"),
+):
+    """
+    GET /api/incidents/{inc_id}/evidence?node_id=saturn
+    Returns evidence/citations for the incident, optionally filtered by node.
+    Used by EvidencePanel component.
+    Matches mockEvidence in frontend/src/data/mockData.ts
+    Returns: { evidence: [{id, type, content, status, details, feedback?}] }
+    """
+    flow_id = get_flow_for_incident(inc_id)
+    flow_evidence = EVIDENCE_BY_FLOW.get(flow_id, {})
+
+    if node_id:
+        # Return evidence for a specific flow node
+        node_evidence = flow_evidence.get(node_id, [])
+        return {"node_id": node_id, "evidence": node_evidence, "total": len(node_evidence)}
+    else:
+        # Return all evidence grouped by node
+        all_evidence = []
+        for nid, ev_list in flow_evidence.items():
+            for ev in ev_list:
+                all_evidence.append({**ev, "node_id": nid})
+        return {"evidence": all_evidence, "total": len(all_evidence)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  LIVE EVENTS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/events", response_model=dict)
+async def get_incident_events(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}/events
+    Returns live investigation events for the incident.
+    Used by LiveEventStream component.
+    Matches mockLiveEvents in frontend/src/data/mockData.ts
+    Returns: { events: [{timestamp, message, type}], connected: bool, count: int }
+    """
+    flow_id = get_flow_for_incident(inc_id)
+    events = LIVE_EVENTS.get(flow_id, [])
+    return {
+        "events": events,
+        "connected": True,
+        "count": len(events),
+        "streaming": True,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  FEEDBACK ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/incidents/{inc_id}/feedback", response_model=dict)
+async def submit_evidence_feedback(inc_id: str, feedback_req: EvidenceFeedbackRequest):
+    """
+    POST /api/incidents/{inc_id}/feedback
+    Submit feedback for an evidence item (thumbs up/down).
+    Used by EvidencePanel component (onFeedback callback).
+    Body: { evidence_id: string, feedback: "useful" | "wrong" }
+    """
+    if inc_id not in FEEDBACK_STORE:
+        FEEDBACK_STORE[inc_id] = []
+
+    FEEDBACK_STORE[inc_id].append({
+        "evidence_id": feedback_req.evidence_id,
+        "feedback": feedback_req.feedback,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
     return {
         "status": "ok",
-        "message": f"Feedback recorded for step {feedback.step_id}",
-        "total_feedback": len(investigation["feedback"]),
+        "message": f"Feedback '{feedback_req.feedback}' recorded for evidence '{feedback_req.evidence_id}'",
+        "total_feedback": len(FEEDBACK_STORE[inc_id]),
     }
 
 
-@app.post("/incidents/{run_id}/approve")
-async def approve_remediation(run_id: str, approval: ApproveRequest):
-    """Approve the proposed remediation action."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+@app.post("/api/incidents/{inc_id}/rca-feedback", response_model=dict)
+async def submit_rca_feedback(inc_id: str, feedback_req: RCAFeedbackRequest):
+    """
+    POST /api/incidents/{inc_id}/rca-feedback
+    Submit feedback for the RCA result (Was this helpful?).
+    Used by RCAPanel component.
+    Body: { feedback: "useful" | "not_useful", comment?: string }
+    """
+    key = f"{inc_id}_rca"
+    if key not in FEEDBACK_STORE:
+        FEEDBACK_STORE[key] = []
 
-    investigation["approved"] = {
-        "approved": approval.approved,
-        "comment": approval.comment,
+    FEEDBACK_STORE[key].append({
+        "feedback": feedback_req.feedback,
+        "comment": feedback_req.comment,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return {
+        "status": "ok",
+        "message": f"RCA feedback '{feedback_req.feedback}' recorded",
+        "total_feedback": len(FEEDBACK_STORE[key]),
+    }
+
+
+@app.post("/api/incidents/{inc_id}/approve", response_model=dict)
+async def approve_remediation(inc_id: str, approval_req: ApproveRequest):
+    """
+    POST /api/incidents/{inc_id}/approve
+    Approve or reject a proposed remediation action.
+    Body: { approved: bool, comment?: string }
+    """
+    APPROVAL_STORE[inc_id] = {
+        "approved": approval_req.approved,
+        "comment": approval_req.comment,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    status = "approved" if approval.approved else "rejected"
+    status = "approved" if approval_req.approved else "rejected"
     return {
         "status": status,
-        "message": f"Remediation {status} for investigation {run_id}",
+        "message": f"Remediation {status} for incident '{inc_id}'",
     }
 
 
-@app.get("/knowledge/flows/{flow_id}")
+# ═══════════════════════════════════════════════════════════════════════════
+#  KNOWLEDGE / FLOW DEFINITIONS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/knowledge/flows", response_model=dict)
+async def list_flow_definitions():
+    """List all available flow definitions."""
+    return {
+        "flows": [
+            {"id": fid, "name": fdef["name"]}
+            for fid, fdef in FLOW_DEFINITIONS.items()
+        ],
+        "total": len(FLOW_DEFINITIONS),
+    }
+
+
+@app.get("/api/knowledge/flows/{flow_id}", response_model=dict)
 async def get_flow_definition(flow_id: str):
-    """Get the flow diagram definition for a specific flow."""
+    """
+    GET /api/knowledge/flows/{flow_id}
+    Get a specific flow diagram definition.
+    Used for Knowledge Base / flow browsing.
+    """
     flow = FLOW_DEFINITIONS.get(flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail=f"Flow '{flow_id}' not found")
-
     return flow
 
 
-@app.get("/incidents")
-async def list_incidents():
-    """List all known incidents (static mock data)."""
+# ═══════════════════════════════════════════════════════════════════════════
+#  QUICK ACTIONS ENDPOINT (for Home Dashboard quick-action cards)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/incidents/{inc_id}/dashboard", response_model=dict)
+async def get_incident_dashboard(inc_id: str):
+    """
+    GET /api/incidents/{inc_id}/dashboard
+    Aggregated endpoint returning all data needed for the Incident Detail page
+    in a single call (flow, rca, actions, evidence, events).
+    """
+    flow_id = get_flow_for_incident(inc_id)
+
+    # Get incident
+    incident = INCIDENTS.get(inc_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
+
+    # Get flow definition
+    flow_def = FLOW_DEFINITIONS.get(flow_id)
+    flow_data = {"flowId": flow_def["id"], "flowName": flow_def["name"], "nodes": flow_def["nodes"]} if flow_def else None
+
+    # Get RCA
+    rca = RCA_RESULTS.get(flow_id, get_default_rca())
+
+    # Get actions
+    actions = BEST_NEXT_ACTIONS.get(flow_id, get_default_actions())
+
+    # Get evidence (all nodes)
+    all_evidence = []
+    flow_evidence = EVIDENCE_BY_FLOW.get(flow_id, {})
+    for nid, ev_list in flow_evidence.items():
+        for ev in ev_list:
+            all_evidence.append({**ev, "node_id": nid})
+
+    # Get events
+    events = LIVE_EVENTS.get(flow_id, [])
+
     return {
-        "incidents": list(MOCK_INCIDENTS.values()),
-        "total": len(MOCK_INCIDENTS),
+        "incident": incident,
+        "flow": flow_data,
+        "rca": rca,
+        "actions": actions,
+        "evidence": all_evidence,
+        "events": events,
+        "analysis_id": f"{inc_id}-{uuid.uuid4().hex[:8]}",
     }
 
 
-@app.get("/incidents/{run_id}/results")
-async def get_investigation_results(run_id: str):
-    """Get the full results of a completed investigation."""
-    investigation = INVESTIGATIONS.get(run_id)
-    if not investigation:
-        raise HTTPException(status_code=404, detail="Investigation not found")
+# ═══════════════════════════════════════════════════════════════════════════
+#  STATS ENDPOINT (for Home Dashboard stats bar)
+# ═══════════════════════════════════════════════════════════════════════════
 
-    flow_def = FLOW_DEFINITIONS.get(investigation.get("flow", "eod_reporting"), FLOW_DEFINITIONS["eod_reporting"])
+@app.get("/api/stats", response_model=dict)
+async def get_dashboard_stats():
+    """
+    GET /api/stats
+    Returns aggregated statistics for the Home Dashboard.
+    Used by HomePage stats bar and filters.
+    """
+    total = len(INCIDENT_SUMMARIES)
+    investigating = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "investigating")
+    resolved = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "resolved")
+    open_inc = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "open")
+    high = sum(1 for i in INCIDENT_SUMMARIES if i["severity"] == "HIGH")
 
     return {
-        "run_id": run_id,
-        "incident_id": investigation["incident_id"],
-        "status": investigation["status"],
-        "flow": flow_def,
-        "rca": flow_def.get("rca", {}),
-        "evidence": flow_def.get("evidence", []),
-        "next_actions": flow_def.get("next_actions", []),
-        "feedback": investigation.get("feedback", []),
-        "approved": investigation.get("approved"),
+        "total": total,
+        "investigating": investigating,
+        "resolved": resolved,
+        "open": open_inc,
+        "high": high,
+        "system_status": "operational",
     }
 
 
-# ─── Helper Functions ────────────────────────────────────────────────────────
-
-def calculate_progress(investigation: dict, flow_def: dict) -> dict:
-    """Calculate the progress of an investigation."""
-    total_steps = sum(len(n["sub_steps"]) for n in flow_def.get("nodes", []))
-    completed_steps = investigation.get("step_index", 0)
-
-    progress_pct = min(100.0, (completed_steps / max(total_steps, 1)) * 100)
-
-    # Determine current phase
-    current_phase = "saturn"
-    for node in flow_def.get("nodes", []):
-        if node["status"] == "active":
-            current_phase = node["id"]
-            break
-
-    return {
-        "percentage": round(progress_pct, 1),
-        "completed_steps": completed_steps,
-        "total_steps": total_steps,
-        "current_phase": current_phase,
-        "status": investigation.get("status", "running"),
-    }
-
-
-# ─── Run ─────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+#  RUN COMMAND
+# ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn
+    print("🚀 IncAnalyserAI Backend starting on http://0.0.0.0:8000")
+    print("📡 API Docs: http://localhost:8000/docs")
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
