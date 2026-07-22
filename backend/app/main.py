@@ -1,19 +1,7 @@
 """
 IncAnalyserAI Backend - FastAPI Application
-Fully in sync with frontend UI (Next.js + TypeScript types).
-All mock data matches frontend/mockData.ts exactly.
-
-API Endpoints (10 total):
-  1. GET  /                           - Service info
-  2. GET  /health                     - Health check
-  3. GET  /api/incidents              - List incident summaries (for Home Dashboard)
-  4. GET  /api/incidents/{inc_id}     - Full incident details (for Incident Page)
-  5. GET  /api/incidents/{inc_id}/flow       - Flow DAG definition
-  6. GET  /api/incidents/{inc_id}/rca        - RCA result
-  7. GET  /api/incidents/{inc_id}/actions    - Best next actions
-  8. GET  /api/incidents/{inc_id}/evidence   - Evidence for a specific flow node
-  9. GET  /api/incidents/{inc_id}/events     - Live events
-  10. POST /api/incidents/{inc_id}/feedback   - Submit evidence feedback
+Provides REST APIs for the incident analysis platform.
+All data is persisted in MongoDB Atlas (single 'incidents' collection).
 """
 
 import json
@@ -24,14 +12,15 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
+from .database import connect_to_mongo, close_mongo_connection, get_incidents_collection
+from .seed import seed_database
 from .models import (
     IncidentSummary,
-    Incident,
+    IncidentDetail,
     FlowNode,
     FlowDefinition,
     Evidence,
-    RCAResult,
+    RootCauseResult,
     BestNextAction,
     LiveEvent,
     InvestigationRequest,
@@ -39,25 +28,13 @@ from .models import (
     RCAFeedbackRequest,
     ApproveRequest,
 )
-from .data import (
-    INCIDENT_SUMMARIES,
-    INCIDENTS,
-    FLOW_DEFINITIONS,
-    EVIDENCE_BY_FLOW,
-    RCA_RESULTS,
-    BEST_NEXT_ACTIONS,
-    LIVE_EVENTS,
-    get_flow_for_incident,
-    get_default_rca,
-    get_default_actions,
-)
 
 # ─── App Setup ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="IncAnalyserAI API",
     description="Backend for AI-powered Production Incident Root Cause Analysis",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -68,9 +45,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store for feedback
-FEEDBACK_STORE: dict[str, list] = {}
-APPROVAL_STORE: dict[str, dict] = {}
+
+# ─── Startup / Shutdown Events ─────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup():
+    """Connect to MongoDB and seed data on startup."""
+    await connect_to_mongo()
+    await seed_database()
+    print("🚀 IncAnalyserAI Backend ready (MongoDB connected & seeded)")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Close MongoDB connection on shutdown."""
+    await close_mongo_connection()
+
 
 # ─── API Routes ─────────────────────────────────────────────────────────────
 
@@ -79,8 +69,9 @@ async def root():
     """Service info."""
     return {
         "service": "IncAnalyserAI API",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "status": "operational",
+        "storage": "MongoDB Atlas",
         "endpoints": [
             "GET  /",
             "GET  /health",
@@ -91,7 +82,13 @@ async def root():
             "GET  /api/incidents/{inc_id}/actions",
             "GET  /api/incidents/{inc_id}/evidence",
             "GET  /api/incidents/{inc_id}/events",
+            "GET  /api/incidents/{inc_id}/dashboard",
             "POST /api/incidents/{inc_id}/feedback",
+            "POST /api/incidents/{inc_id}/rca-feedback",
+            "POST /api/incidents/{inc_id}/approve",
+            "GET  /api/knowledge/flows",
+            "GET  /api/knowledge/flows/{flow_id}",
+            "GET  /api/stats",
         ],
     }
 
@@ -99,78 +96,113 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    try:
+        collection = await get_incidents_collection()
+        doc_count = await collection.count_documents({})
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "database": "connected",
+            "incident_count": doc_count,
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": str(e)},
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  INCIDENT ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents", response_model=dict)
+@app.get("/api/incidents")
 async def list_incidents():
     """
     GET /api/incidents
-    Returns all incident summaries for the Home Dashboard page.
-    Matches mockIncidentSummaries in frontend/src/data/mockData.ts
+    Returns all incident summaries for the Home Dashboard.
     """
+    collection = await get_incidents_collection()
+    cursor = collection.find({}, {
+        "id": 1, "title": 1, "severity": 1, "status": 1,
+        "flowId": 1, "timestamp": 1, "duration": 1, "_id": 0
+    }).sort("timestamp", -1)
+
+    incidents = await cursor.to_list(length=100)
+
+    summaries = []
+    for inc in incidents:
+        summaries.append({
+            "id": inc.get("id", ""),
+            "title": inc.get("title", ""),
+            "severity": inc.get("severity", "LOW"),
+            "status": inc.get("status", "open"),
+            "flow": inc.get("flowId", "unknown"),
+            "timestamp": inc.get("timestamp", ""),
+            "duration": inc.get("duration", "00:00:00"),
+        })
+
     return {
-        "incidents": INCIDENT_SUMMARIES,
-        "total": len(INCIDENT_SUMMARIES),
+        "incidents": summaries,
+        "total": len(summaries),
         "counts": {
-            "total": len(INCIDENT_SUMMARIES),
-            "investigating": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "investigating"),
-            "resolved": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "resolved"),
-            "open": sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "open"),
-            "high": sum(1 for i in INCIDENT_SUMMARIES if i["severity"] == "HIGH"),
+            "total": len(summaries),
+            "investigating": sum(1 for i in summaries if i["status"] == "investigating"),
+            "resolved": sum(1 for i in summaries if i["status"] == "resolved"),
+            "open": sum(1 for i in summaries if i["status"] == "open"),
+            "high": sum(1 for i in summaries if i["severity"] == "HIGH"),
         },
     }
 
 
-@app.get("/api/incidents/{inc_id}", response_model=dict)
+@app.get("/api/incidents/{inc_id}")
 async def get_incident(inc_id: str):
     """
     GET /api/incidents/{inc_id}
     Returns full incident details for the Incident Detail page.
-    Matches mockIncident in frontend/src/data/mockData.ts
-    Returns:
-      - id, title, severity, status, flow, timestamp, duration
-      - originalText, triageSummary
-      - entities: [{name, type, confidence}]
-      - timeline: [{time, event, type}]
     """
-    incident = INCIDENTS.get(inc_id)
-    if not incident:
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0})
+
+    if not doc:
         raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
 
-    return incident
+    return {
+        "id": doc.get("id", ""),
+        "title": doc.get("title", ""),
+        "severity": doc.get("severity", "LOW"),
+        "status": doc.get("status", "open"),
+        "flow": doc.get("flowId", "unknown"),
+        "timestamp": doc.get("timestamp", ""),
+        "duration": doc.get("duration", "00:00:00"),
+        "originalText": doc.get("originalText", ""),
+        "triageSummary": doc.get("triageSummary", ""),
+        "entities": doc.get("entities", []),
+        "timeline": doc.get("timeline", []),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  FLOW DAG ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents/{inc_id}/flow", response_model=dict)
+@app.get("/api/incidents/{inc_id}/flow")
 async def get_incident_flow(inc_id: str):
     """
     GET /api/incidents/{inc_id}/flow
     Returns the Flow DAG definition for the incident.
-    Used by FlowDAG component.
-    Matches flowDefinitions in frontend/src/data/mockData.ts
-    Returns: { flowId, flowName, nodes: [FlowNode] }
     """
-    flow_id = get_flow_for_incident(inc_id)
-    flow_def = FLOW_DEFINITIONS.get(flow_id)
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0, "flow": 1})
 
-    if not flow_def:
-        raise HTTPException(status_code=404, detail=f"Flow definition not found for incident '{inc_id}'")
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
 
+    flow = doc.get("flow", {})
     return {
-        "flowId": flow_def["id"],
-        "flowName": flow_def["name"],
-        "nodes": flow_def["nodes"],
+        "flowId": flow.get("id", ""),
+        "flowName": flow.get("name", ""),
+        "nodes": flow.get("nodes", []),
     }
 
 
@@ -178,21 +210,23 @@ async def get_incident_flow(inc_id: str):
 #  RCA ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents/{inc_id}/rca", response_model=dict)
+@app.get("/api/incidents/{inc_id}/rca")
 async def get_incident_rca(inc_id: str):
     """
     GET /api/incidents/{inc_id}/rca
     Returns Root Cause Analysis result.
-    Used by RCAPanel component.
-    Matches mockRCAResult in frontend/src/data/mockData.ts
-    Returns: { rootCause, confidence, causalChain: [string] }
     """
-    flow_id = get_flow_for_incident(inc_id)
-    rca = RCA_RESULTS.get(flow_id, get_default_rca())
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0, "flow.rca": 1})
+
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
+
+    rca = doc.get("flow", {}).get("rca", {})
     return {
-        "rootCause": rca["rootCause"],
-        "confidence": rca["confidence"],
-        "causalChain": rca["causalChain"],
+        "rootCause": rca.get("rootCause", "No root cause identified"),
+        "confidence": rca.get("confidence", 0.5),
+        "causalChain": rca.get("causalChain", []),
     }
 
 
@@ -200,17 +234,19 @@ async def get_incident_rca(inc_id: str):
 #  BEST NEXT ACTIONS ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents/{inc_id}/actions", response_model=dict)
+@app.get("/api/incidents/{inc_id}/actions")
 async def get_incident_actions(inc_id: str):
     """
     GET /api/incidents/{inc_id}/actions
     Returns Best Next Actions for the incident.
-    Used by RCAPanel component.
-    Matches mockBestNextActions in frontend/src/data/mockData.ts
-    Returns: { actions: [{id, label, action, category}] }
     """
-    flow_id = get_flow_for_incident(inc_id)
-    actions = BEST_NEXT_ACTIONS.get(flow_id, get_default_actions())
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0, "flow.nextActions": 1})
+
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
+
+    actions = doc.get("flow", {}).get("nextActions", [])
     return {"actions": actions}
 
 
@@ -218,7 +254,7 @@ async def get_incident_actions(inc_id: str):
 #  EVIDENCE ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents/{inc_id}/evidence", response_model=dict)
+@app.get("/api/incidents/{inc_id}/evidence")
 async def get_incident_evidence(
     inc_id: str,
     node_id: Optional[str] = Query(None, description="Filter evidence by flow node ID"),
@@ -226,23 +262,20 @@ async def get_incident_evidence(
     """
     GET /api/incidents/{inc_id}/evidence?node_id=saturn
     Returns evidence/citations for the incident, optionally filtered by node.
-    Used by EvidencePanel component.
-    Matches mockEvidence in frontend/src/data/mockData.ts
-    Returns: { evidence: [{id, type, content, status, details, feedback?}] }
     """
-    flow_id = get_flow_for_incident(inc_id)
-    flow_evidence = EVIDENCE_BY_FLOW.get(flow_id, {})
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0, "flow.evidence": 1})
+
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
+
+    all_evidence = doc.get("flow", {}).get("evidence", [])
 
     if node_id:
-        # Return evidence for a specific flow node
-        node_evidence = flow_evidence.get(node_id, [])
-        return {"node_id": node_id, "evidence": node_evidence, "total": len(node_evidence)}
+        # Filter evidence by node_id (nodes in evidence have node_id field)
+        filtered = [e for e in all_evidence if e.get("node_id") == node_id]
+        return {"node_id": node_id, "evidence": filtered, "total": len(filtered)}
     else:
-        # Return all evidence grouped by node
-        all_evidence = []
-        for nid, ev_list in flow_evidence.items():
-            for ev in ev_list:
-                all_evidence.append({**ev, "node_id": nid})
         return {"evidence": all_evidence, "total": len(all_evidence)}
 
 
@@ -250,21 +283,20 @@ async def get_incident_evidence(
 #  LIVE EVENTS ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/incidents/{inc_id}/events", response_model=dict)
+@app.get("/api/incidents/{inc_id}/events")
 async def get_incident_events(inc_id: str):
     """
     GET /api/incidents/{inc_id}/events
     Returns live investigation events for the incident.
-    Used by LiveEventStream component.
-    Matches mockLiveEvents in frontend/src/data/mockData.ts
-    Returns: { events: [{timestamp, message, type}], connected: bool, count: int }
     """
-    flow_id = get_flow_for_incident(inc_id)
-    events = LIVE_EVENTS.get(flow_id, [])
+    # Events are generated dynamically; for now return a default set
+    # In future, this will pull from an investigation session
     return {
-        "events": events,
+        "events": [
+            {"timestamp": "00:00:00", "message": "Investigation initialized", "type": "info"},
+        ],
         "connected": True,
-        "count": len(events),
+        "count": 1,
         "streaming": True,
     }
 
@@ -273,13 +305,15 @@ async def get_incident_events(inc_id: str):
 #  FEEDBACK ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/incidents/{inc_id}/feedback", response_model=dict)
+FEEDBACK_STORE: dict[str, list] = {}
+APPROVAL_STORE: dict[str, dict] = {}
+
+
+@app.post("/api/incidents/{inc_id}/feedback")
 async def submit_evidence_feedback(inc_id: str, feedback_req: EvidenceFeedbackRequest):
     """
     POST /api/incidents/{inc_id}/feedback
     Submit feedback for an evidence item (thumbs up/down).
-    Used by EvidencePanel component (onFeedback callback).
-    Body: { evidence_id: string, feedback: "useful" | "wrong" }
     """
     if inc_id not in FEEDBACK_STORE:
         FEEDBACK_STORE[inc_id] = []
@@ -297,13 +331,11 @@ async def submit_evidence_feedback(inc_id: str, feedback_req: EvidenceFeedbackRe
     }
 
 
-@app.post("/api/incidents/{inc_id}/rca-feedback", response_model=dict)
+@app.post("/api/incidents/{inc_id}/rca-feedback")
 async def submit_rca_feedback(inc_id: str, feedback_req: RCAFeedbackRequest):
     """
     POST /api/incidents/{inc_id}/rca-feedback
-    Submit feedback for the RCA result (Was this helpful?).
-    Used by RCAPanel component.
-    Body: { feedback: "useful" | "not_useful", comment?: string }
+    Submit feedback for the RCA result.
     """
     key = f"{inc_id}_rca"
     if key not in FEEDBACK_STORE:
@@ -322,12 +354,11 @@ async def submit_rca_feedback(inc_id: str, feedback_req: RCAFeedbackRequest):
     }
 
 
-@app.post("/api/incidents/{inc_id}/approve", response_model=dict)
+@app.post("/api/incidents/{inc_id}/approve")
 async def approve_remediation(inc_id: str, approval_req: ApproveRequest):
     """
     POST /api/incidents/{inc_id}/approve
     Approve or reject a proposed remediation action.
-    Body: { approved: bool, comment?: string }
     """
     APPROVAL_STORE[inc_id] = {
         "approved": approval_req.approved,
@@ -343,99 +374,135 @@ async def approve_remediation(inc_id: str, approval_req: ApproveRequest):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  KNOWLEDGE / FLOW DEFINITIONS ENDPOINT
+#  DASHBOARD AGGREGATED ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/knowledge/flows", response_model=dict)
-async def list_flow_definitions():
-    """List all available flow definitions."""
-    return {
-        "flows": [
-            {"id": fid, "name": fdef["name"]}
-            for fid, fdef in FLOW_DEFINITIONS.items()
-        ],
-        "total": len(FLOW_DEFINITIONS),
-    }
-
-
-@app.get("/api/knowledge/flows/{flow_id}", response_model=dict)
-async def get_flow_definition(flow_id: str):
-    """
-    GET /api/knowledge/flows/{flow_id}
-    Get a specific flow diagram definition.
-    Used for Knowledge Base / flow browsing.
-    """
-    flow = FLOW_DEFINITIONS.get(flow_id)
-    if not flow:
-        raise HTTPException(status_code=404, detail=f"Flow '{flow_id}' not found")
-    return flow
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  QUICK ACTIONS ENDPOINT (for Home Dashboard quick-action cards)
-# ═══════════════════════════════════════════════════════════════════════════
-
-@app.get("/api/incidents/{inc_id}/dashboard", response_model=dict)
+@app.get("/api/incidents/{inc_id}/dashboard")
 async def get_incident_dashboard(inc_id: str):
     """
     GET /api/incidents/{inc_id}/dashboard
-    Aggregated endpoint returning all data needed for the Incident Detail page
-    in a single call (flow, rca, actions, evidence, events).
+    Aggregated endpoint returning all data for the Incident Detail page.
     """
-    flow_id = get_flow_for_incident(inc_id)
+    collection = await get_incidents_collection()
+    doc = await collection.find_one({"id": inc_id}, {"_id": 0})
 
-    # Get incident
-    incident = INCIDENTS.get(inc_id)
-    if not incident:
+    if not doc:
         raise HTTPException(status_code=404, detail=f"Incident '{inc_id}' not found")
 
-    # Get flow definition
-    flow_def = FLOW_DEFINITIONS.get(flow_id)
-    flow_data = {"flowId": flow_def["id"], "flowName": flow_def["name"], "nodes": flow_def["nodes"]} if flow_def else None
+    flow = doc.get("flow", {})
 
-    # Get RCA
-    rca = RCA_RESULTS.get(flow_id, get_default_rca())
+    # Build incident detail
+    incident = {
+        "id": doc.get("id", ""),
+        "title": doc.get("title", ""),
+        "severity": doc.get("severity", "LOW"),
+        "status": doc.get("status", "open"),
+        "flow": doc.get("flowId", "unknown"),
+        "timestamp": doc.get("timestamp", ""),
+        "duration": doc.get("duration", "00:00:00"),
+        "originalText": doc.get("originalText", ""),
+        "triageSummary": doc.get("triageSummary", ""),
+        "entities": doc.get("entities", []),
+        "timeline": doc.get("timeline", []),
+    }
 
-    # Get actions
-    actions = BEST_NEXT_ACTIONS.get(flow_id, get_default_actions())
+    # Flow definition
+    flow_data = {
+        "flowId": flow.get("id", ""),
+        "flowName": flow.get("name", ""),
+        "nodes": flow.get("nodes", []),
+    } if flow else None
 
-    # Get evidence (all nodes)
-    all_evidence = []
-    flow_evidence = EVIDENCE_BY_FLOW.get(flow_id, {})
-    for nid, ev_list in flow_evidence.items():
-        for ev in ev_list:
-            all_evidence.append({**ev, "node_id": nid})
+    # RCA
+    rca = flow.get("rca", {})
+    rca_result = {
+        "rootCause": rca.get("rootCause", "No root cause identified"),
+        "confidence": rca.get("confidence", 0.5),
+        "causalChain": rca.get("causalChain", []),
+    }
 
-    # Get events
-    events = LIVE_EVENTS.get(flow_id, [])
+    # Actions
+    actions = flow.get("nextActions", [])
+
+    # Evidence
+    evidence = flow.get("evidence", [])
+
+    # Events
+    events = [
+        {"timestamp": "00:00:00", "message": "Investigation initialized", "type": "info"},
+    ]
 
     return {
         "incident": incident,
         "flow": flow_data,
-        "rca": rca,
+        "rca": rca_result,
         "actions": actions,
-        "evidence": all_evidence,
+        "evidence": evidence,
         "events": events,
         "analysis_id": f"{inc_id}-{uuid.uuid4().hex[:8]}",
     }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  STATS ENDPOINT (for Home Dashboard stats bar)
+#  KNOWLEDGE / FLOW DEFINITIONS ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════
 
-@app.get("/api/stats", response_model=dict)
+@app.get("/api/knowledge/flows")
+async def list_flow_definitions():
+    """List all available flow definitions by inspecting incidents collection."""
+    collection = await get_incidents_collection()
+    pipeline = [
+        {"$group": {"_id": "$flowId", "name": {"$first": "$flow.name"}}},
+        {"$project": {"_id": 0, "flowId": "$_id", "name": 1}},
+    ]
+    cursor = collection.aggregate(pipeline)
+    flows = await cursor.to_list(length=100)
+
+    return {
+        "flows": [{"id": f["flowId"], "name": f.get("name", f["flowId"])} for f in flows],
+        "total": len(flows),
+    }
+
+
+@app.get("/api/knowledge/flows/{flow_id}")
+async def get_flow_definition(flow_id: str):
+    """
+    GET /api/knowledge/flows/{flow_id}
+    Get a specific flow diagram definition.
+    """
+    collection = await get_incidents_collection()
+    doc = await collection.find_one(
+        {"flow.id": flow_id},
+        {"_id": 0, "flow": 1}
+    )
+
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Flow '{flow_id}' not found")
+
+    return doc["flow"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  STATS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/stats")
 async def get_dashboard_stats():
     """
     GET /api/stats
     Returns aggregated statistics for the Home Dashboard.
-    Used by HomePage stats bar and filters.
     """
-    total = len(INCIDENT_SUMMARIES)
-    investigating = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "investigating")
-    resolved = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "resolved")
-    open_inc = sum(1 for i in INCIDENT_SUMMARIES if i["status"] == "open")
-    high = sum(1 for i in INCIDENT_SUMMARIES if i["severity"] == "HIGH")
+    collection = await get_incidents_collection()
+    all_incidents = await collection.find(
+        {},
+        {"_id": 0, "status": 1, "severity": 1}
+    ).to_list(length=100)
+
+    total = len(all_incidents)
+    investigating = sum(1 for i in all_incidents if i.get("status") == "investigating")
+    resolved = sum(1 for i in all_incidents if i.get("status") == "resolved")
+    open_inc = sum(1 for i in all_incidents if i.get("status") == "open")
+    high = sum(1 for i in all_incidents if i.get("severity") == "HIGH")
 
     return {
         "total": total,
@@ -455,5 +522,6 @@ if __name__ == "__main__":
     import uvicorn
     print("🚀 IncAnalyserAI Backend starting on http://0.0.0.0:8000")
     print("📡 API Docs: http://localhost:8000/docs")
+    print("🗄️  Storage: MongoDB Atlas")
     uvicorn.run(app, host="0.0.0.0", port=8000)
 

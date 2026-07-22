@@ -1,4 +1,5 @@
-"""Pydantic models matching frontend TypeScript types exactly."""
+"""Pydantic models matching frontend TypeScript types exactly.
+Includes MongoDB document model for the single 'incidents' collection."""
 
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -40,7 +41,7 @@ class IncidentSummary(BaseModel):
     duration: str
 
 
-class Incident(BaseModel):
+class IncidentDetail(BaseModel):
     id: str
     title: str
     severity: str
@@ -69,13 +70,10 @@ class Evidence(BaseModel):
     feedback: Optional[str] = None  # useful | wrong
 
 
-class RootCause(BaseModel):
-    rootCause: str = Field(alias="root_cause")
+class RootCauseResult(BaseModel):
+    rootCause: str
     confidence: float
-    causalChain: list[str] = Field(alias="causal_chain", default_factory=list)
-
-    class Config:
-        populate_by_name = True
+    causalChain: list[str] = Field(default_factory=list)
 
 
 class BestNextAction(BaseModel):
@@ -85,16 +83,54 @@ class BestNextAction(BaseModel):
     category: str  # rerun | recompute | notify | investigate
 
 
-class RCAResult(BaseModel):
-    rootCause: str
-    confidence: float
-    causalChain: list[str] = Field(default_factory=list)
-
-
 class FlowDefinition(BaseModel):
     id: str
     name: str
     nodes: list[FlowNode] = Field(default_factory=list)
+
+
+class FlowEmbedded(BaseModel):
+    """Embedded flow definition inside an incident document."""
+    id: str
+    name: str
+    nodes: list[FlowNode] = Field(default_factory=list)
+    rca: RootCauseResult = Field(default_factory=lambda: RootCauseResult(rootCause="", confidence=0.0, causalChain=[]))
+    evidence: list[Evidence] = Field(default_factory=list)
+    nextActions: list[BestNextAction] = Field(default_factory=list)
+
+
+class InvestigationState(BaseModel):
+    """Investigation session state embedded inside incident document."""
+    runId: Optional[str] = None
+    status: str = "idle"  # idle | running | completed | failed
+    stepIndex: int = 0
+    currentPhase: Optional[str] = None
+    feedback: list[dict] = Field(default_factory=list)
+    approved: Optional[dict] = None
+    createdAt: Optional[str] = None
+
+
+class IncidentDocument(BaseModel):
+    """
+    Full MongoDB document schema for the single 'incidents' collection.
+    Combines incident details + embedded flow + investigation state.
+    """
+    id: str
+    title: str
+    severity: str
+    status: str
+    flowId: str
+    timestamp: str
+    duration: str
+    description: str = ""
+    originalText: str = ""
+    triageSummary: str = ""
+    entities: list[Entity] = Field(default_factory=list)
+    timeline: list[TimelineEvent] = Field(default_factory=list)
+    flow: FlowEmbedded = Field(default_factory=FlowEmbedded)
+    investigation: InvestigationState = Field(default_factory=InvestigationState)
+    createdAt: str = ""
+    updatedAt: str = ""
 
 
 # ─── Request Models ─────────────────────────────────────────────────────

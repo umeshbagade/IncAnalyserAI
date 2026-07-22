@@ -1,21 +1,109 @@
 /**
  * API Client for IncAnalyserAI Backend
- * All API calls made through Next.js rewrite proxy (/api/* -> backend:8000/api/*)
+ * 
+ * All API calls to the FastAPI backend go through this module.
+ * Uses relative URLs via Next.js proxy rewrites (see next.config.js)
+ * to avoid CORS issues.
  */
 
-const BASE_URL = '/api';
+const API_BASE = '';  // Relative — proxied via Next.js rewrites
 
-interface ApiResponse<T> {
-  data: T | null;
-  error: string | null;
-  loading: boolean;
+// ─── Types ────────────────────────────────────────────────────────────────
+
+export interface ApiIncidentSummary {
+  id: string;
+  title: string;
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  status: 'open' | 'investigating' | 'resolved';
+  flow: string;
+  timestamp: string;
+  duration: string;
 }
 
-async function fetchApi<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> {
-  const url = `${BASE_URL}${endpoint}`;
+export interface ApiIncidentDetail {
+  id: string;
+  title: string;
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  status: 'open' | 'investigating' | 'resolved';
+  flow: string;
+  timestamp: string;
+  duration: string;
+  originalText: string;
+  triageSummary: string;
+  entities: Array<{ name: string; type: string; confidence: number }>;
+  timeline: Array<{ time: string; event: string; type: 'info' | 'warning' | 'error' | 'success' }>;
+}
+
+export interface ApiFlowData {
+  flowId: string;
+  flowName: string;
+  nodes: ApiFlowNode[];
+}
+
+export interface ApiFlowNode {
+  id: string;
+  label: string;
+  status: 'pending' | 'active' | 'completed' | 'error' | 'skipped';
+  description: string;
+  subSteps: Array<{
+    id: string;
+    label: string;
+    status: 'pending' | 'active' | 'completed' | 'error' | 'skipped';
+  }>;
+}
+
+export interface ApiRCAResult {
+  rootCause: string;
+  confidence: number;
+  causalChain: string[];
+}
+
+export interface ApiAction {
+  id: string;
+  label: string;
+  action: string;
+  category: 'rerun' | 'recompute' | 'notify' | 'investigate';
+}
+
+export interface ApiEvidence {
+  id: string;
+  type: 'tool_call' | 'runbook' | 'similar_incident';
+  content: string;
+  status: 'success' | 'failed' | 'warning';
+  details: string;
+  feedback?: 'useful' | 'wrong';
+  node_id?: string;
+}
+
+export interface ApiEvent {
+  timestamp: string;
+  message: string;
+  type: 'triage' | 'plan' | 'step' | 'rca' | 'info' | 'error';
+}
+
+export interface ApiDashboard {
+  incident: ApiIncidentDetail;
+  flow: ApiFlowData | null;
+  rca: ApiRCAResult;
+  actions: ApiAction[];
+  evidence: ApiEvidence[];
+  events: ApiEvent[];
+  analysis_id: string;
+}
+
+export interface ApiStats {
+  total: number;
+  investigating: number;
+  resolved: number;
+  open: number;
+  high: number;
+  system_status: string;
+}
+
+// ─── Generic Fetch Helper ─────────────────────────────────────────────────
+
+async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const url = `${API_BASE}${endpoint}`;
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
@@ -26,221 +114,130 @@ async function fetchApi<T>(
 
   if (!res.ok) {
     const errorBody = await res.text();
-    throw new Error(`API ${res.status}: ${errorBody || res.statusText}`);
+    throw new Error(`API Error ${res.status}: ${errorBody || res.statusText}`);
   }
 
   return res.json();
 }
 
-// ─── Incidents ──────────────────────────────────────────────────────
+// ─── API Functions ────────────────────────────────────────────────────────
 
-export interface IncidentStats {
+/** GET /api/incidents — list all incident summaries */
+export async function fetchIncidents(): Promise<{
+  incidents: ApiIncidentSummary[];
   total: number;
-  investigating: number;
-  resolved: number;
-  open: number;
-  high: number;
+  counts: Record<string, number>;
+}> {
+  return fetchApi('/api/incidents');
 }
 
-export interface IncidentListItem {
-  id: string;
-  title: string;
-  severity: 'HIGH' | 'MEDIUM' | 'LOW';
-  status: 'open' | 'investigating' | 'resolved';
-  flow: string;
-  timestamp: string;
-  duration: string;
+/** GET /api/incidents/{inc_id} — full incident detail */
+export async function fetchIncidentDetail(incId: string): Promise<ApiIncidentDetail> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}`);
 }
 
-export interface IncidentsResponse {
-  incidents: IncidentListItem[];
-  total: number;
-  counts: IncidentStats;
+/** GET /api/incidents/{inc_id}/flow — flow DAG definition */
+export async function fetchIncidentFlow(incId: string): Promise<ApiFlowData> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/flow`);
 }
 
-export async function getIncidents(): Promise<IncidentsResponse> {
-  return fetchApi<IncidentsResponse>('/incidents');
+/** GET /api/incidents/{inc_id}/rca — root cause analysis */
+export async function fetchIncidentRCA(incId: string): Promise<ApiRCAResult> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/rca`);
 }
 
-export async function getDashboardStats(): Promise<IncidentStats & { system_status: string }> {
-  return fetchApi('/stats');
+/** GET /api/incidents/{inc_id}/actions — best next actions */
+export async function fetchIncidentActions(incId: string): Promise<{ actions: ApiAction[] }> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/actions`);
 }
 
-// ─── Single Incident ───────────────────────────────────────────────
-
-export interface TimelineEvent {
-  time: string;
-  event: string;
-  type: 'info' | 'warning' | 'error' | 'success';
-}
-
-export interface Entity {
-  name: string;
-  type: string;
-  confidence: number;
-}
-
-export interface IncidentDetail {
-  id: string;
-  title: string;
-  severity: 'HIGH' | 'MEDIUM' | 'LOW';
-  status: 'open' | 'investigating' | 'resolved';
-  flow: string;
-  timestamp: string;
-  duration: string;
-  originalText: string;
-  triageSummary: string;
-  entities: Entity[];
-  timeline: TimelineEvent[];
-}
-
-export async function getIncident(incId: string): Promise<IncidentDetail> {
-  return fetchApi<IncidentDetail>(`/incidents/${incId}`);
-}
-
-// ─── Flow DAG ──────────────────────────────────────────────────────
-
-export interface SubStep {
-  id: string;
-  label: string;
-  status: 'pending' | 'active' | 'completed' | 'error' | 'skipped';
-}
-
-export interface FlowNode {
-  id: string;
-  label: string;
-  status: 'pending' | 'active' | 'completed' | 'error' | 'skipped';
-  description: string;
-  subSteps: SubStep[];
-}
-
-export interface FlowResponse {
-  flowId: string;
-  flowName: string;
-  nodes: FlowNode[];
-}
-
-export async function getIncidentFlow(incId: string): Promise<FlowResponse> {
-  return fetchApi<FlowResponse>(`/incidents/${incId}/flow`);
-}
-
-// ─── RCA ───────────────────────────────────────────────────────────
-
-export interface RCAResult {
-  rootCause: string;
-  confidence: number;
-  causalChain: string[];
-}
-
-export async function getIncidentRCA(incId: string): Promise<RCAResult> {
-  return fetchApi<RCAResult>(`/incidents/${incId}/rca`);
-}
-
-// ─── Best Next Actions ─────────────────────────────────────────────
-
-export interface BestNextAction {
-  id: string;
-  label: string;
-  action: string;
-  category: 'rerun' | 'recompute' | 'notify' | 'investigate';
-}
-
-export async function getIncidentActions(incId: string): Promise<{ actions: BestNextAction[] }> {
-  return fetchApi<{ actions: BestNextAction[] }>(`/incidents/${incId}/actions`);
-}
-
-// ─── Evidence ──────────────────────────────────────────────────────
-
-export interface Evidence {
-  id: string;
-  type: 'tool_call' | 'runbook' | 'similar_incident';
-  content: string;
-  status: 'success' | 'failed' | 'warning';
-  details: string;
-  feedback?: 'useful' | 'wrong';
-}
-
-export interface EvidenceResponse {
-  evidence: Evidence[];
-  total: number;
-  node_id?: string;
-}
-
-export async function getEvidence(
+/** GET /api/incidents/{inc_id}/evidence — evidence list */
+export async function fetchIncidentEvidence(
   incId: string,
   nodeId?: string
-): Promise<EvidenceResponse> {
-  const query = nodeId ? `?node_id=${nodeId}` : '';
-  return fetchApi<EvidenceResponse>(`/incidents/${incId}/evidence${query}`);
+): Promise<{ evidence: ApiEvidence[]; total: number }> {
+  const query = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : '';
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/evidence${query}`);
 }
 
-// ─── Live Events ───────────────────────────────────────────────────
-
-export interface LiveEvent {
-  timestamp: string;
-  message: string;
-  type: 'triage' | 'plan' | 'step' | 'rca' | 'info' | 'error';
-}
-
-export interface EventsResponse {
-  events: LiveEvent[];
+/** GET /api/incidents/{inc_id}/events — live events */
+export async function fetchIncidentEvents(incId: string): Promise<{
+  events: ApiEvent[];
   connected: boolean;
   count: number;
-  streaming: boolean;
+}> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/events`);
 }
 
-export async function getIncidentEvents(incId: string): Promise<EventsResponse> {
-  return fetchApi<EventsResponse>(`/incidents/${incId}/events`);
+/** GET /api/incidents/{inc_id}/dashboard — all data in one call */
+export async function fetchIncidentDashboard(incId: string): Promise<ApiDashboard> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/dashboard`);
 }
 
-// ─── Dashboard (Aggregated) ────────────────────────────────────────
-
-export interface DashboardResponse {
-  incident: IncidentDetail;
-  flow: FlowResponse | null;
-  rca: RCAResult;
-  actions: BestNextAction[];
-  evidence: (Evidence & { node_id: string })[];
-  events: LiveEvent[];
-  analysis_id: string;
-}
-
-export async function getIncidentDashboard(incId: string): Promise<DashboardResponse> {
-  return fetchApi<DashboardResponse>(`/incidents/${incId}/dashboard`);
-}
-
-// ─── Feedback / Approval ───────────────────────────────────────────
-
+/** POST /api/incidents/{inc_id}/feedback — submit evidence feedback */
 export async function submitEvidenceFeedback(
   incId: string,
   evidenceId: string,
   feedback: 'useful' | 'wrong'
-): Promise<{ status: string; message: string; total_feedback: number }> {
-  return fetchApi(`/incidents/${incId}/feedback`, {
+): Promise<{ status: string; message: string }> {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/feedback`, {
     method: 'POST',
     body: JSON.stringify({ evidence_id: evidenceId, feedback }),
   });
 }
 
+/** POST /api/incidents/{inc_id}/rca-feedback — submit RCA feedback */
 export async function submitRCAFeedback(
   incId: string,
   feedback: 'useful' | 'not_useful',
   comment?: string
 ): Promise<{ status: string; message: string }> {
-  return fetchApi(`/incidents/${incId}/rca-feedback`, {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/rca-feedback`, {
     method: 'POST',
     body: JSON.stringify({ feedback, comment }),
   });
 }
 
+/** POST /api/incidents/{inc_id}/approve — approve/reject remediation */
 export async function approveRemediation(
   incId: string,
   approved: boolean,
   comment?: string
 ): Promise<{ status: string; message: string }> {
-  return fetchApi(`/incidents/${incId}/approve`, {
+  return fetchApi(`/api/incidents/${encodeURIComponent(incId)}/approve`, {
     method: 'POST',
     body: JSON.stringify({ approved, comment }),
   });
 }
+
+/** GET /api/stats — dashboard statistics */
+export async function fetchStats(): Promise<ApiStats> {
+  return fetchApi('/api/stats');
+}
+
+/** GET /api/knowledge/flows — list all flow definitions */
+export async function fetchFlowDefinitions(): Promise<{ flows: Array<{ id: string; name: string }>; total: number }> {
+  return fetchApi('/api/knowledge/flows');
+}
+
+/** GET /api/knowledge/flows/{flow_id} — get specific flow definition */
+export async function fetchFlowDefinition(flowId: string): Promise<ApiFlowData & { rca?: any; evidence?: any[]; nextActions?: any[] }> {
+  return fetchApi(`/api/knowledge/flows/${encodeURIComponent(flowId)}`);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COMPATIBILITY EXPORTS (aliases used by existing page.tsx imports)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export type IncidentListItem = ApiIncidentSummary;
+export type IncidentStats = ApiStats;
+export type DashboardResponse = ApiDashboard;
+
+// Aliases used by existing page.tsx imports
+export const getIncidents = fetchIncidents;
+export const getDashboardStats = fetchStats;
+export const getIncidentDashboard = fetchIncidentDashboard;
+export const getEvidence = fetchIncidentEvidence;
+export const getIncidentEvents = fetchIncidentEvents;
 
