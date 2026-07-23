@@ -1,0 +1,10 @@
+edges:
+  - from: user_upload
+    to: hive.ingestion.bcs_a
+    via: upload_ingestion
+  - from: hive.ingestion.bcs_a
+    to: hive.landing.bcs_a
+    via: data_hub
+  - from: hive.landing.bcs_a
+    to: saturn.report
+    via: saturn

@@ -1,0 +1,22 @@
+flow_id: fsb_reporting
+description: "Monthly feed -> DQ -> snapshot -> Saturn report"
+steps:
+  - step: 1
+    system: pe_ingestion
+    action: "Ingest source feeds via Spark, land in Oracle PE staging"
+    success_signal: "airflow_dag=fsb_ingest_Monthly status=SUCCESS"
+    artifact: "oracle.pe_fsb_staging.<feed>_<cob>"
+  - step: 2
+    system: treasury_data_hub
+    action: "Run DQ rules, create Monthly snapshot per feed+COB"
+    success_signal: "dh.snapshot_status(feed, cob) = APPROVED"
+    artifact: "dh.snapshot_<feed>_<cob>"
+  - step: 3
+    system: saturn_v1
+    action: "Generate reporting-ready data, publish to Tableau"
+    success_signal: "saturn.report_status(report, cob) = PUBLISHED"
+    artifact: "tableau.report_<name>_<cob>"
+
+sla:
+  cob_close: "18:00"
+  report_ready: "21:00"

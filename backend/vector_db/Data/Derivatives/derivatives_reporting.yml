@@ -1,0 +1,25 @@
+flow_id: derivatives_reporting
+description: Daily Upload → snapshot → Enrichment → Saturn report
+
+steps:
+  - step: 1
+    system: upload_ingestion
+    action: Ingest source feeds via Spark, land in Hive staging
+    success_signal: derivatives_data_ingest = derivatives_ingest_daily status=SUCCESS
+    artifact: hive.ingest.<feed>_<cob>
+
+  - step: 2
+    system: data_hub
+    action: Run DQ rules, create daily snapshot per feed+COB
+    success_signal: dh.snapshot_status(feed, cob) = APPROVED
+    artifact: dh.snapshot_<feed>_<cob>
+
+  - step: 3
+    system: saturn
+    action: Generate reporting-ready data, publish to Tableau
+    success_signal: saturn.report_status(report, cob) = PUBLISHED
+    artifact: tableau.report_<name>_<cob>
+
+sla:
+  cob_close: 18:00
+  report_ready: 21:00

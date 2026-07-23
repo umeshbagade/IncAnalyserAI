@@ -1,0 +1,12 @@
+edges:
+  - from: source_feed_A
+    to: hive.ingest.feed_a
+    via: upload_ingestion
+
+  - from: hive.ingest.feed_a
+    to: dh.snapshot_feed_a
+    via: data_hub
+
+  - from: dh.snapshot_feed_a
+    to: saturn.report_x
+    via: saturn
