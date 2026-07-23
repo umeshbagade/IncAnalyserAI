@@ -154,3 +154,10 @@ class ApproveRequest(BaseModel):
     approved: bool = True
     comment: Optional[str] = None
 
+
+class CreateIncidentRequest(BaseModel):
+    title: str
+    description: str = ""
+    severity: str = "MEDIUM"  # HIGH | MEDIUM | LOW
+    flowId: str = "SATURN"
+

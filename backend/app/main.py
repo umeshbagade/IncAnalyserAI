@@ -28,6 +28,7 @@ from .models import (
     EvidenceFeedbackRequest,
     RCAFeedbackRequest,
     ApproveRequest,
+    CreateIncidentRequest,
 )
 
 # ─── App Setup ──────────────────────────────────────────────────────────────
@@ -153,6 +154,31 @@ async def list_incidents():
             "resolved": sum(1 for i in summaries if i["status"] == "resolved"),
             "open": sum(1 for i in summaries if i["status"] == "open"),
             "high": sum(1 for i in summaries if i["severity"] == "HIGH"),
+        },
+    }
+
+
+@app.post("/api/incidents")
+async def create_incident(req: CreateIncidentRequest):
+    """
+    POST /api/incidents
+    Dummy placeholder — creates a structured mock response without database interaction.
+    Returns a fake incident summary as if the incident was created.
+    """
+    import uuid
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    inc_id = f"INC-{today}-{uuid.uuid4().hex[:4].upper()}"
+
+    return {
+        "status": "created",
+        "incident": {
+            "id": inc_id,
+            "title": req.title,
+            "severity": req.severity,
+            "status": "open",
+            "flow": req.flowId,
+            "timestamp": today,
+            "duration": "00:00:00",
         },
     }
 

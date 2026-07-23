@@ -124,13 +124,13 @@ export default function HomePage() {
               title: 'New Investigation',
               desc: 'Start a new incident analysis',
               icon: <Search size={20} className="text-[var(--accent)]" />,
-              onClick: () => {},
+              onClick: () => router.push('/inc/new'),
             },
             {
               title: 'View All INCs',
               desc: 'Browse all recorded incidents',
               icon: <Activity size={20} className="text-[var(--accent)]" />,
-              onClick: () => {},
+              onClick: () => router.push('/incs'),
             },
             {
               title: 'Knowledge Base',

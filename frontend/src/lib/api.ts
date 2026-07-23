@@ -226,6 +226,20 @@ export async function fetchFlowDefinition(flowId: string): Promise<ApiFlowData &
 }
 
 
+/** POST /api/incidents — create a new incident */
+export async function createIncident(data: {
+  title: string;
+  description?: string;
+  severity?: 'HIGH' | 'MEDIUM' | 'LOW';
+  flowId?: string;
+}): Promise<{ status: string; incident: ApiIncidentSummary }> {
+  return fetchApi('/api/incidents', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  COMPATIBILITY EXPORTS (aliases used by existing page.tsx imports)
 // ═══════════════════════════════════════════════════════════════════════════
