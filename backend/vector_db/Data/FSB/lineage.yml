@@ -1,0 +1,19 @@
+edges:
+  - from: source_feed_Z
+    to: oracle.pe_staging.feed_z
+    via: pe_ingestion
+  - from: oracle.pe_staging.feed_z
+    to: dh.snapshot_feed_z
+    via: data_hub
+  - from: dh.snapshot_feed_z
+    to: saturn.report_fsb
+    via: saturn
+  - from: source_feed_X
+    to: oracle.pe_staging.feed_x
+    via: pe_ingestion
+  - from: oracle.pe_staging.feed_x
+    to: dh.snapshot_feed_x
+    via: data_hub
+  - from: dh.snapshot_feed_x
+    to: saturn.report_fsb
+    via: saturn

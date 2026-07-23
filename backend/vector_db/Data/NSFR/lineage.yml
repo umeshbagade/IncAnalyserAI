@@ -1,0 +1,10 @@
+edges:
+  - from: source_nsfr_feed
+    to: hive.ingestion.nsfr
+    via: upload_ingestion
+  - from: hive.ingestion.nsfr
+    to: dh.snapshot_nsfr
+    via: data_hub
+  - from: dh.snapshot_nsfr
+    to: saturn.report_nsfr
+    via: saturn
