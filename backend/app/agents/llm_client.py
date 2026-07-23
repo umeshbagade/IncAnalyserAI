@@ -16,15 +16,22 @@ from __future__ import annotations
 import json
 import os
 import traceback
+from pathlib import Path
 from typing import Any, Type, TypeVar
 
-from openai import AzureOpenAI
+from dotenv import load_dotenv
+from openai import AzureOpenAI, OpenAI
 from pydantic import BaseModel
+
+# Load environment variables from backend/.env regardless of the current
+# working directory, so Azure OpenAI credentials are always available.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 T = TypeVar("T", bound=BaseModel)
 
-_client: AzureOpenAI | None = None
+_client: AzureOpenAI | OpenAI | None = None
 _fallback_mode: bool = False
+_current_model: str = "gpt-4o"  # default model; updated during client init
 
 
 def _sanitize_endpoint(endpoint: str) -> str:
@@ -53,15 +60,18 @@ def _sanitize_endpoint(endpoint: str) -> str:
     return endpoint.rstrip("/")
 
 
-def _get_client() -> AzureOpenAI:
-    global _client, _fallback_mode
+def _get_client() -> AzureOpenAI | OpenAI | None:
+    global _client, _fallback_mode, _current_model
     if _client is not None:
         return _client
 
+    # ──────────────────────────────────────────────────────────────────
+    # Azure OpenAI (only supported provider)
+    # ──────────────────────────────────────────────────────────────────
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
-    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+    _current_model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
 
     if not endpoint or not api_key:
         print("⚠️  AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_API_KEY not set — running in FALLBACK mock mode.")
@@ -77,8 +87,27 @@ def _get_client() -> AzureOpenAI:
         api_key=api_key,
         api_version=api_version,
     )
-    print(f"✅ Azure OpenAI client initialized (deployment={deployment}, endpoint={clean_endpoint})")
+    print(f"✅ Azure OpenAI client initialized (deployment={_current_model}, endpoint={clean_endpoint})")
     return _client
+
+
+def _build_schema_instruction(response_model: Type[BaseModel]) -> str:
+    """
+    Build an instruction block that tells the LLM the exact JSON schema it
+    must return. Injecting the target model's schema (field names, types and
+    required fields) makes every agent call self-describing, so the model
+    returns a payload that validates against `response_model`.
+    """
+    schema = response_model.model_json_schema()
+    required = schema.get("required", [])
+    return (
+        "\n\nYou MUST respond with a single valid JSON object that conforms "
+        f"exactly to this JSON Schema for `{response_model.__name__}`:\n"
+        f"{json.dumps(schema)}\n\n"
+        f"ALL of these fields are REQUIRED and must be present: {required}. "
+        "Do not omit any required field. Do not add fields that are not in "
+        "the schema. Do not wrap the JSON in markdown fences or any prose."
+    )
 
 
 def call_llm_structured(
@@ -105,16 +134,30 @@ def call_llm_structured(
         return _fallback_call_llm_structured(system_prompt, user_prompt, response_model, temperature)
 
     try:
-        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-        response = _client.chat.completions.create(
-            model=deployment,
-            messages=[
-                {"role": "system", "content": system_prompt},
+        # Use the globally determined model name (set during client init)
+        model = _current_model
+
+        # Reasoning models (gpt-5 family, o-series) only support the default
+        # temperature (1) and reject an explicit temperature parameter.
+        supports_temperature = not any(
+            model.lower().startswith(prefix) for prefix in ("gpt-5", "o1", "o3", "o4")
+        )
+
+        schema_instruction = _build_schema_instruction(response_model)
+
+        request_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt + schema_instruction},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
+            "response_format": {"type": "json_object"},
+        }
+        if supports_temperature:
+            request_kwargs["temperature"] = temperature
+
+        response = _client.chat.completions.create(**request_kwargs)
+
 
         content = response.choices[0].message.content
         if not content:

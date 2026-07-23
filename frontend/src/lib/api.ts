@@ -81,6 +81,11 @@ export interface ApiEvent {
   type: 'triage' | 'plan' | 'step' | 'rca' | 'info' | 'error';
 }
 
+export interface ApiInvestigationStatus {
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  currentPhase: string;
+}
+
 export interface ApiDashboard {
   incident: ApiIncidentDetail;
   flow: ApiFlowData | null;
@@ -88,6 +93,7 @@ export interface ApiDashboard {
   actions: ApiAction[];
   evidence: ApiEvidence[];
   events: ApiEvent[];
+  investigation: ApiInvestigationStatus;
   analysis_id: string;
 }
 

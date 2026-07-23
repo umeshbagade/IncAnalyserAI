@@ -1,14 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { FlowNode, LiveEvent, Evidence, Incident, RCAResult, BestNextAction } from '@/types';
 import {
   getIncidentDashboard,
-  getEvidence,
-  getIncidentEvents,
   submitEvidenceFeedback,
-  DashboardResponse,
 } from '@/lib/api';
 import Header from '@/components/Header';
 import IncidentPanel from '@/components/IncidentPanel';
@@ -25,57 +22,55 @@ export default function IncidentDashboard() {
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [events, setEvents] = useState<LiveEvent[]>([]);
-  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
+  const [allEvidence, setAllEvidence] = useState<Evidence[]>([]);
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [incident, setIncident] = useState<Incident | null>(null);
   const [rcaResult, setRcaResult] = useState<RCAResult | null>(null);
   const [bestNextActions, setBestNextActions] = useState<BestNextAction[]>([]);
-  const [isConnected, setIsConnected] = useState(true);
   const [eventCount, setEventCount] = useState(0);
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [investigationStatus, setInvestigationStatus] = useState<string>('idle');
+
+  const isRunning = investigationStatus === 'running';
 
   useEffect(() => {
     setAnalysisId(incId + '-' + Date.now().toString(36));
   }, [incId]);
 
-  // Fetch all dashboard data from backend
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      try {
-        const dashboard = await getIncidentDashboard(incId);
-        setIncident(dashboard.incident as Incident);
-        if (dashboard.flow) {
-          setFlowNodes(dashboard.flow.nodes as FlowNode[]);
-        }
-        setRcaResult(dashboard.rca as RCAResult);
-        setBestNextActions(dashboard.actions as BestNextAction[]);
-        setEvidenceList(dashboard.evidence as Evidence[]);
-        setEvents(dashboard.events as LiveEvent[]);
-        setEventCount(dashboard.events.length);
-      } catch (err) {
-        console.error('Failed to fetch incident dashboard:', err);
-      } finally {
-        setLoading(false);
+  // Single loader used for both the initial fetch and live polling.
+  const loadDashboard = useCallback(async (isInitial: boolean) => {
+    try {
+      const dashboard = await getIncidentDashboard(incId);
+      setIncident(dashboard.incident as Incident);
+      if (dashboard.flow) {
+        setFlowNodes(dashboard.flow.nodes as FlowNode[]);
       }
+      setRcaResult(dashboard.rca as RCAResult);
+      setBestNextActions(dashboard.actions as BestNextAction[]);
+      setAllEvidence(dashboard.evidence as Evidence[]);
+      setEvents(dashboard.events as LiveEvent[]);
+      setEventCount(dashboard.events.length);
+      setInvestigationStatus(dashboard.investigation?.status ?? 'idle');
+    } catch (err) {
+      console.error('Failed to fetch incident dashboard:', err);
+    } finally {
+      if (isInitial) setLoading(false);
     }
-    fetchData();
   }, [incId]);
 
-  // Refetch evidence when a node is selected
+  // Initial load.
   useEffect(() => {
-    if (!selectedNode) return;
-    async function fetchEvidence() {
-      try {
-        const res = await getEvidence(incId, selectedNode!.id);
-        setEvidenceList(res.evidence as Evidence[]);
-      } catch (err) {
-        console.error('Failed to fetch evidence:', err);
-      }
-    }
-    fetchEvidence();
-  }, [incId, selectedNode]);
+    setLoading(true);
+    loadDashboard(true);
+  }, [incId, loadDashboard]);
+
+  // Live polling while the investigation is running.
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => loadDashboard(false), 1500);
+    return () => clearInterval(timer);
+  }, [isRunning, loadDashboard]);
 
   const handleNodeSelect = (node: FlowNode | null) => {
     setSelectedNode(node);
@@ -85,7 +80,7 @@ export default function IncidentDashboard() {
   const handleEvidenceFeedback = async (evidenceId: string, feedback: 'useful' | 'wrong') => {
     try {
       await submitEvidenceFeedback(incId, evidenceId, feedback);
-      setEvidenceList(prev =>
+      setAllEvidence(prev =>
         prev.map(e => e.id === evidenceId ? { ...e, feedback } : e)
       );
     } catch (err) {
@@ -97,6 +92,11 @@ export default function IncidentDashboard() {
     setEvents([]);
     setEventCount(0);
   };
+
+  // Evidence shown in the right panel is filtered client-side by the selected node.
+  const nodeEvidence = selectedNode
+    ? allEvidence.filter(e => e.node_id === selectedNode.id)
+    : [];
 
   if (loading || !incident) {
     return (
@@ -148,6 +148,12 @@ export default function IncidentDashboard() {
                       <circle cx="12" cy="12" r="3" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" />
                     </svg>
                     Analysis Flow (DAG)
+                    {isRunning && (
+                      <span className="flex items-center gap-1 text-[10px] text-[var(--accent)] bg-[var(--accent)]/10 px-2 py-0.5 rounded-full">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
+                        LIVE
+                      </span>
+                    )}
                   </h2>
                   <span className="text-[10px] text-[var(--muted)] bg-[var(--surface-light)] px-2 py-1 rounded">
                     Phase: {flowNodes.find(n => n.status === 'active')?.label || flowNodes[0]?.label || 'SATURN'}
@@ -163,7 +169,7 @@ export default function IncidentDashboard() {
           </div>
           <LiveEventStream
             events={events}
-            isConnected={isConnected}
+            isConnected={isRunning}
             eventCount={eventCount}
             onClear={handleClearEvents}
           />
@@ -172,7 +178,7 @@ export default function IncidentDashboard() {
         {/* RIGHT PANEL (25%) */}
         <div className="w-[25%] min-w-[250px] border-l border-[var(--border)] overflow-hidden">
           <EvidencePanel
-            evidence={selectedNode ? evidenceList : []}
+            evidence={nodeEvidence}
             selectedNode={selectedNode}
             onFeedback={handleEvidenceFeedback}
           />

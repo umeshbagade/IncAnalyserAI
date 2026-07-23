@@ -51,6 +51,7 @@ export interface Evidence {
   status: 'success' | 'failed' | 'warning';
   details: string;
   feedback?: 'useful' | 'wrong';
+  node_id?: string;
 }
 
 export interface RCAResult {

@@ -540,10 +540,23 @@ async def get_incident_dashboard(inc_id: str):
     # Evidence
     evidence = flow.get("evidence", [])
 
-    # Events
+    # Events — derived from the incident timeline (agent audit trail), so the
+    # Live Event Stream reflects real agent activity as the investigation runs.
+    timeline = doc.get("timeline", [])
+    event_type_map = {
+        "info": "info", "step": "step", "rca": "rca",
+        "warning": "info", "error": "error", "success": "step",
+    }
     events = [
-        {"timestamp": "00:00:00", "message": "Investigation initialized", "type": "info"},
-    ]
+        {
+            "timestamp": t.get("time", ""),
+            "message": t.get("event", ""),
+            "type": event_type_map.get(t.get("type", "info"), "info"),
+        }
+        for t in timeline
+    ] or [{"timestamp": "", "message": "Investigation initialized", "type": "info"}]
+
+    investigation = doc.get("investigation", {}) or {}
 
     return {
         "incident": incident,
@@ -552,6 +565,10 @@ async def get_incident_dashboard(inc_id: str):
         "actions": actions,
         "evidence": evidence,
         "events": events,
+        "investigation": {
+            "status": investigation.get("status", "idle"),
+            "currentPhase": investigation.get("currentPhase", ""),
+        },
         "analysis_id": f"{inc_id}-{uuid.uuid4().hex[:8]}",
     }
 

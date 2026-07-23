@@ -135,8 +135,8 @@ class RunbookPlan(BaseModel):
 
 class Finding(BaseModel):
     """Structured output every Specialist agent must produce — no prose."""
-    step_id: str
-    system: str
+    step_id: str = ""
+    system: str = ""
     status: FindingStatus
     anomalies: List[str] = Field(default_factory=list)
     evidence_refs: List[str] = Field(default_factory=list)

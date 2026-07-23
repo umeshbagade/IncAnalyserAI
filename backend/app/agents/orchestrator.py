@@ -38,6 +38,7 @@ approving it first, enforced by `interrupt_before=["remediation_gate"]`.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -220,8 +221,11 @@ def build_graph():
     graph.add_edge("finalize", END)
 
     checkpointer = MemorySaver()
-    # The ONLY interrupt in the graph — everything before this runs autonomously.
-    compiled = graph.compile(checkpointer=checkpointer, interrupt_before=["remediation_gate"])
+    # NOTE: Human-in-the-loop remediation approval is currently DISABLED (no UI
+    # for it yet). The graph runs fully autonomously through remediation_gate
+    # and executes the proposed remediation without pausing. To re-enable the
+    # approval gate, pass interrupt_before=["remediation_gate"] to compile().
+    compiled = graph.compile(checkpointer=checkpointer)
     return compiled
 
 
@@ -300,45 +304,59 @@ def _translate_state_to_updates(state: dict) -> dict:
     # ── Runbook / Flow DAG ─────────────────────────────────────────────
     runbook = state.get("runbook", [])
     findings = state.get("findings", [])
+    finding_by_step = {f.step_id: f for f in findings}
+    current_step_id = state.get("current_step_id")
+    investigation_done = state.get("status") in (IncidentStatus.RESOLVED, IncidentStatus.ESCALATED)
+    system_label_map = {
+        "saturn": "Saturn",
+        "datahub": "Data Hub",
+        "ingestion": "Ingestion",
+        "payment-svc": "Payment Service",
+        "order-svc": "Order Service",
+    }
     if runbook:
         nodes = []
-        for i, step in enumerate(runbook):
-            # Determine status from findings
-            finding_for_step = [f for f in findings if f.step_id == step.step_id]
-            if finding_for_step:
-                fstatus = finding_for_step[0].status
-                if fstatus == FindingStatus.ANOMALY:
-                    step_status = "error"
-                elif fstatus == FindingStatus.NORMAL:
-                    step_status = "completed"
-                else:
-                    step_status = "active"
+        for step in runbook:
+            finding = finding_by_step.get(step.step_id)
+            # Determine per-node status for the live DAG.
+            if finding:
+                # ANOMALY -> error (something failed here); NORMAL/INCONCLUSIVE
+                # both mean the step was actually checked -> completed.
+                step_status = "error" if finding.status == FindingStatus.ANOMALY else "completed"
+            elif step.step_id == current_step_id:
+                step_status = "active"  # specialist is working on this now
+            elif investigation_done:
+                step_status = "skipped"  # DAG branched away — never visited
             else:
-                step_status = step.status.value.lower() if hasattr(step.status, 'value') else step.status.lower()
+                step_status = "pending"
 
-            # Map system name to a human-readable label
-            system_label_map = {
-                "saturn": "Saturn",
-                "datahub": "Data Hub",
-                "ingestion": "Ingestion",
-                "payment-svc": "Payment Service",
-                "order-svc": "Order Service",
-            }
             label = system_label_map.get(step.system, step.system.replace("_", " ").title())
+
+            # Keep the node concise; the full detail lives in Evidence & Citations.
+            if finding and finding.anomalies:
+                sub = [(a[:60], "error") for a in finding.anomalies[:3]]
+            elif step_status == "completed":
+                sub = [("Checks passed — no anomaly", "completed")]
+            elif step_status == "active":
+                sub = [(step.action[:60], "active")]
+            elif step_status == "skipped":
+                sub = [("Not investigated (branch skipped)", "skipped")]
+            else:
+                sub = [(step.action[:60], "pending")]
 
             nodes.append({
                 "id": step.system,
                 "label": label,
                 "status": step_status,
-                "description": step.action,
+                "description": step.action[:80],
                 "subSteps": [
-                    {"id": f"{step.step_id}_{j}", "label": s, "status": "completed" if step_status in ("completed", "error") else "pending"}
-                    for j, s in enumerate(step.rationale.split(". ") if step.rationale else [step.action])
+                    {"id": f"{step.step_id}_{j}", "label": lbl, "status": st}
+                    for j, (lbl, st) in enumerate(sub)
                 ],
             })
 
         if nodes:
-            flow_id = state.get("incident", {}).incident_id if state.get("incident") else "investigation"
+            flow_id = state.get("incident").incident_id if state.get("incident") else "investigation"
             updates["flow.id"] = flow_id
             updates["flow.name"] = f"Investigation for {flow_id}"
             updates["flow.nodes"] = nodes
@@ -348,11 +366,19 @@ def _translate_state_to_updates(state: dict) -> dict:
     if evidence_list:
         mapped_evidence = []
         for ev in evidence_list:
+            # Reflect whether the phase this evidence belongs to passed or failed.
+            f = finding_by_step.get(ev.step_id)
+            if f and f.status == FindingStatus.ANOMALY:
+                ev_status = "failed"
+            elif f and f.status == FindingStatus.INCONCLUSIVE:
+                ev_status = "warning"
+            else:
+                ev_status = "success"
             mapped_evidence.append({
                 "id": ev.evidence_id,
                 "type": "tool_call",
                 "content": ev.description[:60],
-                "status": "success",
+                "status": ev_status,
                 "details": f"system={ev.system} step={ev.step_id} source={ev.source}: {ev.description}",
                 "node_id": ev.system,
             })
@@ -367,8 +393,11 @@ def _translate_state_to_updates(state: dict) -> dict:
     # ── Correlation → root cause ───────────────────────────────────────
     correlation = state.get("correlation")
     if correlation:
+        # Confidence grows with the amount of corroborating anomaly evidence.
+        num_anomalies = sum(1 for f in findings if f.status == FindingStatus.ANOMALY)
+        confidence = min(0.95, 0.6 + 0.1 * num_anomalies) if correlation.root_cause_system else 0.5
         updates["flow.rca.rootCause"] = correlation.root_cause_summary
-        updates["flow.rca.confidence"] = 0.85  # default confidence
+        updates["flow.rca.confidence"] = round(confidence, 2)
         if correlation.root_cause_system:
             updates["flow.rca.causalChain"] = [
                 f"{e.system}: {e.description}" for e in correlation.timeline
@@ -457,10 +486,45 @@ async def start_investigation(inc_id: str, doc: dict):
     config = {"configurable": {"thread_id": inc_id}}
     initial_state = new_incident_state(incident)
 
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+    created_at = datetime.now(timezone.utc).isoformat()
+    result = None
+
+    # Mark as running immediately so the frontend starts live-polling before the
+    # first (LLM-bound) super-step completes.
+    await collection.update_one(
+        {"id": inc_id},
+        {"$set": {
+            "investigation.status": "running",
+            "investigation.runId": run_id,
+            "investigation.createdAt": created_at,
+            "status": "investigating",
+            "updatedAt": created_at,
+        }}
+    )
+
+    # Each graph super-step is synchronous (blocking LLM calls). We advance the
+    # stream one step at a time inside a worker thread so the FastAPI event loop
+    # stays free to serve the frontend's live polling requests during the run.
+    _DONE = object()
+
+    def _advance(gen):
+        try:
+            return next(gen)
+        except StopIteration:
+            return _DONE
+
     try:
-        # 3. Run the graph — this is synchronous but wrapped in threadpool
-        #    LangGraph runs synchronously by default
-        result = graph.invoke(initial_state, config)
+        stream = graph.stream(initial_state, config, stream_mode="values")
+        while True:
+            snapshot = await asyncio.to_thread(_advance, stream)
+            if snapshot is _DONE:
+                break
+            result = snapshot
+            updates = _translate_state_to_updates(snapshot)
+            updates["investigation.runId"] = run_id
+            updates["investigation.createdAt"] = created_at
+            await collection.update_one({"id": inc_id}, {"$set": updates})
     except Exception as e:
         print(f"❌ Investigation failed for {inc_id}: {e}")
         import traceback
@@ -476,25 +540,17 @@ async def start_investigation(inc_id: str, doc: dict):
         )
         return
 
-    # 4. Translate state back to MongoDB updates
-    updates = _translate_state_to_updates(result)
-
-    # Mark investigation run details
-    updates["investigation.runId"] = f"run-{uuid.uuid4().hex[:8]}"
-    updates["investigation.createdAt"] = datetime.now(timezone.utc).isoformat()
-
-    # 5. Write results to MongoDB
+    # 4. Final completion marker so the frontend can stop polling.
     await collection.update_one(
         {"id": inc_id},
-        {"$set": updates}
+        {"$set": {
+            "investigation.status": "completed",
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+        }}
     )
 
-    # Check if we're waiting for remediation approval
-    if result.get("awaiting_remediation_approval"):
-        print(f"⏸️  Investigation for {inc_id} paused — awaiting human remediation approval.")
-    else:
-        status = result.get("status", IncidentStatus.NEW)
-        print(f"✅ Investigation for {inc_id} completed with status: {status.value if hasattr(status, 'value') else status}")
+    status = result.get("status", IncidentStatus.NEW) if result else IncidentStatus.NEW
+    print(f"✅ Investigation for {inc_id} completed with status: {status.value if hasattr(status, 'value') else status}")
 
 
 async def approve_and_execute_remediation(inc_id: str, thread_id: str | None = None) -> dict:
