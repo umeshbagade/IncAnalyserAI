@@ -1,0 +1,20 @@
+flow_id: stratplan_reporting
+description: Daily Upload -> Snapshot -> Processing -> Reporting
+steps:
+  - step: 1
+    system: upload_ingestion
+    action: upload bcs_data by user uploads, land in Hive staging area
+    success_signal: bcs_data_download = bcs_downloader status = SUCCESS
+    artifacts: hive.ingestion.bcs_a
+
+  - step: 2
+    system: data_hub
+    action: snapshot bcs_data from Hive staging area to Hive landing area
+    success_signal: bcs_data_snapshot = bcs_snapshot status = SUCCESS
+    artifacts: hive.landing.bcs_a
+
+  - step: 3
+    system: saturn
+    action: process bcs_data from Hive landing area to generate reports
+    success_signal: bcs_data_report = bcs_report status = SUCCESS
+    artifacts: saturn.report

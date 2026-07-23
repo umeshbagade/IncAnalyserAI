@@ -1,0 +1,798 @@
+{
+  "total_chunks": 112,
+  "total_files": 53,
+  "domains": {
+    "derivatives": 13,
+    "fsb": 19,
+    "nsfr": 40,
+    "stratplan": 40
+  },
+  "embedding_model": "all-MiniLM-L6-v2",
+  "collection": "incanalyser_knowledge",
+  "files_processed": [
+    {
+      "file": "derivatives_reporting.yml",
+      "domain": "derivatives",
+      "system": "derivatives_reporting",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "derivatives_reporting.yml",
+      "domain": "derivatives",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "derivatives",
+      "system": "lineage",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "derivatives",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "derivatives",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "derivatives",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "derivatives",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "derivatives",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "derivatives",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "derivatives",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "derivatives",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "derivatives",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "derivatives",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "fsb_bsm_reporting.yml",
+      "domain": "fsb",
+      "system": "fsb_reporting",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "fsb_bsm_reporting.yml",
+      "domain": "fsb",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "fsb",
+      "system": "lineage",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "fsb",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "fsb",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "fsb",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "fsb",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "fsb",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "fsb",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "fsb",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "fsb",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "fsb",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "fsb",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "fsb",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "fsb",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "fsb",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "fsb",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "fsb",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "fsb",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "nsfr",
+      "system": "lineage",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "nsfr",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "nsfr_reporting.yml",
+      "domain": "nsfr",
+      "system": "nsfr_reporting",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "nsfr_reporting.yml",
+      "domain": "nsfr",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "nsfr",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "nsfr",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "nsfr",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "stratplan",
+      "system": "lineage",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "lineage.yml",
+      "domain": "stratplan",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "stratplan_reporting.yml",
+      "domain": "stratplan",
+      "system": "stratplan_reporting",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "stratplan_reporting.yml",
+      "domain": "stratplan",
+      "system": "config",
+      "type": "yml",
+      "incident": ""
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_2"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_4"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_3"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "data_hub.md",
+      "domain": "stratplan",
+      "system": "data_hub",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "saturn.md",
+      "domain": "stratplan",
+      "system": "saturn",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    },
+    {
+      "file": "upload_ingestion.md",
+      "domain": "stratplan",
+      "system": "upload_ingestion",
+      "type": "md",
+      "incident": "INC_1"
+    }
+  ]
+}

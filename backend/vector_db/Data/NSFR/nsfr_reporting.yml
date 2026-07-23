@@ -1,0 +1,21 @@
+flow_id: nsfr_reporting
+description: Daily NSFR feed -> DQ -> Snapshot -> Saturn report
+steps:
+  - step: 1
+    system: upload_ingestion
+    action: Ingest NSFR source feeds via Spark, land in Hive staging
+    success_signal: nsfr_data_ingest = nsfr_ingest_daily status=SUCCESS
+    artifact: hive.ingestion.nsfr_<cob>
+
+  - step: 2
+    system: data_hub
+    action: Run DQ rules on NSFR data, create daily snapshot
+    success_signal: dh.snapshot_status(nsfr, cob) = APPROVED
+    artifact: dh.snapshot_nsfr_<cob>
+
+  - step: 3
+    system: saturn
+    action: Generate NSFR reporting-ready data, publish to Tableau
+    success_signal: saturn.report_status(nsfr, cob) = PUBLISHED
+    artifact: tableau.report_nsfr_<cob>
+
