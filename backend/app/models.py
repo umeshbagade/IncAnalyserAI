@@ -155,6 +155,12 @@ class ApproveRequest(BaseModel):
     comment: Optional[str] = None
 
 
+class AnalyzeRequest(BaseModel):
+    """Request body for the /api/analyze endpoint."""
+    description: str
+    top_k: int = Field(default=5, ge=1, le=20, description="Number of vector DB results")
+
+
 class CreateIncidentRequest(BaseModel):
     title: str
     description: str = ""

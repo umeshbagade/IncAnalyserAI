@@ -28,8 +28,10 @@ from .models import (
     EvidenceFeedbackRequest,
     RCAFeedbackRequest,
     ApproveRequest,
+    AnalyzeRequest,
     CreateIncidentRequest,
 )
+from .query_service import analyze_description as qs_analyze_description
 
 # ─── App Setup ──────────────────────────────────────────────────────────────
 
@@ -92,6 +94,7 @@ async def root():
             "GET  /api/knowledge/flows",
             "GET  /api/knowledge/flows/{flow_id}",
             "GET  /api/stats",
+            "POST /api/analyze",
         ],
     }
 
@@ -162,12 +165,72 @@ async def list_incidents():
 async def create_incident(req: CreateIncidentRequest):
     """
     POST /api/incidents
-    Dummy placeholder — creates a structured mock response without database interaction.
-    Returns a fake incident summary as if the incident was created.
+    Create a new incident, persist to MongoDB, and kick off AI agent investigation.
     """
-    import uuid
+    from .agents.orchestrator import start_investigation  # lazy import to avoid circular deps
+
+    collection = await get_incidents_collection()
+
+    # Generate a new INC ID: INC-YYYY-MM-DD-XXX
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    inc_id = f"INC-{today}-{uuid.uuid4().hex[:4].upper()}"
+    count = await collection.count_documents({})
+    seq = f"{count + 1:03d}"
+    inc_id = f"INC-{today}-{seq}"
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Build default flow nodes for the given flowId
+    flow_nodes = [
+        {"id": "triage", "label": "Triage", "status": "pending", "description": "Initial triage and classification", "subSteps": []},
+        {"id": "saturn", "label": "Saturn", "status": "pending", "description": "Analyze Saturn service logs & metrics", "subSteps": []},
+        {"id": "v1", "label": "V1", "status": "pending", "description": "Check V1 service health & errors", "subSteps": []},
+        {"id": "tdh", "label": "TDH", "status": "pending", "description": "Inspect TDH data pipeline", "subSteps": []},
+        {"id": "ingestion", "label": "Ingestion", "status": "pending", "description": "Verify ingestion pipeline integrity", "subSteps": []},
+        {"id": "rca", "label": "Root Cause", "status": "pending", "description": "Synthesize findings into root cause", "subSteps": []},
+        {"id": "remediate", "label": "Remediation", "status": "pending", "description": "Generate remediation steps", "subSteps": []},
+    ]
+
+    doc = {
+        "id": inc_id,
+        "title": req.title,
+        "severity": req.severity,
+        "status": "open",
+        "flowId": req.flowId,
+        "timestamp": today,
+        "duration": "00:00:00",
+        "description": req.description,
+        "originalText": req.description,
+        "triageSummary": "",
+        "entities": [],
+        "timeline": [
+            {"time": "00:00:00", "event": "Incident created", "type": "info"},
+        ],
+        "flow": {
+            "id": req.flowId,
+            "name": req.flowId,
+            "nodes": flow_nodes,
+            "rca": {"rootCause": "", "confidence": 0.0, "causalChain": []},
+            "evidence": [],
+            "nextActions": [],
+        },
+        "investigation": {
+            "runId": None,
+            "status": "running",  # running | completed | failed
+            "stepIndex": 0,
+            "currentPhase": "triage",
+            "feedback": [],
+            "approved": None,
+            "createdAt": now,
+        },
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    await collection.insert_one(doc)
+
+    # Start AI agent investigation in background task
+    import asyncio
+    asyncio.create_task(start_investigation(inc_id, doc))
 
     return {
         "status": "created",
@@ -387,18 +450,40 @@ async def approve_remediation(inc_id: str, approval_req: ApproveRequest):
     """
     POST /api/incidents/{inc_id}/approve
     Approve or reject a proposed remediation action.
-    """
-    APPROVAL_STORE[inc_id] = {
-        "approved": approval_req.approved,
-        "comment": approval_req.comment,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
 
-    status = "approved" if approval_req.approved else "rejected"
-    return {
-        "status": status,
-        "message": f"Remediation {status} for incident '{inc_id}'",
-    }
+    If approved, the agent system executes the remediation plan.
+    If rejected, the incident is finalized without remediation.
+    """
+    from .agents.orchestrator import approve_and_execute_remediation
+
+    if not approval_req.approved:
+        # Rejected — just mark it and finalize
+        APPROVAL_STORE[inc_id] = {
+            "approved": False,
+            "comment": approval_req.comment,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return {
+            "status": "rejected",
+            "message": f"Remediation rejected for incident '{inc_id}'",
+        }
+
+    try:
+        updates = await approve_and_execute_remediation(inc_id)
+        APPROVAL_STORE[inc_id] = {
+            "approved": True,
+            "comment": approval_req.comment,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        return {
+            "status": "approved",
+            "message": f"Remediation approved and executed for incident '{inc_id}'",
+            "result": updates.get("status", "resolved"),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to execute remediation: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -540,6 +625,41 @@ async def get_dashboard_stats():
         "high": high,
         "system_status": "operational",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ANALYZE ENDPOINT — Unified Knowledge Graph + Vector DB Query
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/analyze")
+async def analyze_incident(request: AnalyzeRequest):
+    """
+    POST /api/analyze
+
+    Accepts a user's incident description and queries both:
+      1. Knowledge Graph — finds matching systems, upstream sources, downstream impacts
+      2. Vector DB — retrieves relevant runbook chunks and configuration documents
+
+    Returns a combined structured result with a compiled query string
+    that can be used as an LLM prompt or for further downstream processing.
+
+    Request Body:
+      {
+        "description": "Market data feed stale - primary Bloomberg feed unresponsive",
+        "top_k": 5
+      }
+    """
+    if not request.description.strip():
+        raise HTTPException(status_code=400, detail="description cannot be empty")
+
+    try:
+        result = qs_analyze_description(request.description, top_k=request.top_k)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
