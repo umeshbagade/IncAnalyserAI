@@ -28,7 +28,9 @@ from .models import (
     EvidenceFeedbackRequest,
     RCAFeedbackRequest,
     ApproveRequest,
+    AnalyzeRequest,
 )
+from .query_service import analyze_description as qs_analyze_description
 
 # ─── App Setup ──────────────────────────────────────────────────────────────
 
@@ -91,6 +93,7 @@ async def root():
             "GET  /api/knowledge/flows",
             "GET  /api/knowledge/flows/{flow_id}",
             "GET  /api/stats",
+            "POST /api/analyze",
         ],
     }
 
@@ -514,6 +517,41 @@ async def get_dashboard_stats():
         "high": high,
         "system_status": "operational",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ANALYZE ENDPOINT — Unified Knowledge Graph + Vector DB Query
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/analyze")
+async def analyze_incident(request: AnalyzeRequest):
+    """
+    POST /api/analyze
+
+    Accepts a user's incident description and queries both:
+      1. Knowledge Graph — finds matching systems, upstream sources, downstream impacts
+      2. Vector DB — retrieves relevant runbook chunks and configuration documents
+
+    Returns a combined structured result with a compiled query string
+    that can be used as an LLM prompt or for further downstream processing.
+
+    Request Body:
+      {
+        "description": "Market data feed stale - primary Bloomberg feed unresponsive",
+        "top_k": 5
+      }
+    """
+    if not request.description.strip():
+        raise HTTPException(status_code=400, detail="description cannot be empty")
+
+    try:
+        result = qs_analyze_description(request.description, top_k=request.top_k)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Analysis failed: {str(e)}",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
