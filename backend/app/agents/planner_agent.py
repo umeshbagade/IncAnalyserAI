@@ -15,7 +15,8 @@ anomaly was actually found.
 from __future__ import annotations
 
 from . import llm_client
-from .models import ActorType, AuditEvent, IncidentGraphState, IncidentStatus, RunbookPlan
+from .models import ActorType, AuditEvent, IncidentGraphState, IncidentStatus, PlanStep, RunbookPlan
+from .knowledge import incident_kb
 from .knowledge.topology_store import get_downstream_systems, get_system, search_similar_runbooks
 
 SYSTEM_PROMPT = """\
@@ -53,6 +54,58 @@ def planner_node(state: IncidentGraphState) -> dict:
     triage = state["triage"]
     assert triage is not None, "planner_node requires triage to have run first"
 
+    # ── Data-driven path: build the DAG straight from the matched runbook ──
+    flow_hint = incident.suspected_systems[0] if incident.suspected_systems else ""
+    case = incident_kb.match_case(incident.title, incident.description, flow_hint)
+    if case is not None:
+        ordered = case.ordered_layers  # e.g. ["saturn", "datahub", "ingestion"]
+        steps: list[PlanStep] = []
+        for idx, layer in enumerate(ordered):
+            doc = incident_kb.get_layer_doc(case, layer)
+            step_id = f"s{idx + 1}"
+            next_id = f"s{idx + 2}" if idx + 1 < len(ordered) else None
+            label = incident_kb.LAYER_LABELS.get(layer, layer.title())
+            action = (doc.checks[0] if doc and doc.checks else f"Verify {label} for the reported discrepancy")
+            steps.append(
+                PlanStep(
+                    step_id=step_id,
+                    system=layer,
+                    action=action,
+                    rationale=(
+                        f"Trace the discrepancy at {label}; if confirmed, escalate to the "
+                        f"upstream source layer as the runbook's Next Actions instruct."
+                    ),
+                    assigned_agent=f"{layer}_specialist",
+                    on_anomaly=next_id,   # discrepancy here -> drill to the upstream source
+                    on_clean=None,        # clean here -> nothing further to check
+                )
+            )
+        plan = RunbookPlan(
+            entry_step_id="s1",
+            steps=steps,
+            planning_rationale=(
+                f"Runbook '{case.key}' drives a straight upstream drill: "
+                f"{' → '.join(incident_kb.LAYER_LABELS.get(l, l) for l in ordered)}. "
+                f"Each layer is checked in turn; a confirmed discrepancy escalates to the "
+                f"next-deeper source layer, ending at the root-cause layer."
+            ),
+        )
+        audit_entry = AuditEvent(
+            actor=ActorType.PLANNER_AGENT,
+            event_type="RUNBOOK_DRAFTED",
+            detail=(
+                f"entry=s1 steps={[(s.step_id, s.system) for s in steps]}. {plan.planning_rationale}"
+            ),
+        )
+        return {
+            "runbook": plan.steps,
+            "entry_step_id": plan.entry_step_id,
+            "current_step_id": plan.entry_step_id,
+            "status": IncidentStatus.INVESTIGATING,
+            "audit_trail": state.get("audit_trail", []) + [audit_entry],
+        }
+
+    # ── Fallback: LLM planner for non-catalogued incidents ─────────────
     candidate_ids = {triage.entry_point_service}
     candidate_ids.update(get_downstream_systems(triage.entry_point_service))
 

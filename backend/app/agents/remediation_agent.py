@@ -11,7 +11,16 @@ anything in this file.
 from __future__ import annotations
 
 from . import llm_client
-from .models import ActorType, AuditEvent, CurrentAction, IncidentGraphState, IncidentStatus, RemediationPlan
+from .models import (
+    ActorType,
+    AuditEvent,
+    CurrentAction,
+    IncidentGraphState,
+    IncidentStatus,
+    RemediationAction,
+    RemediationPlan,
+)
+from .knowledge import incident_kb
 
 SYSTEM_PROMPT = """\
 You are the Remediation Agent. You're given a Correlator's root-cause
@@ -39,7 +48,62 @@ why in the rationale — do not force a remediation that isn't warranted.
 def remediation_node(state: IncidentGraphState) -> dict:
     correlation = state["correlation"]
     assert correlation is not None, "remediation_node requires correlation to have run first"
+    incident = state["incident"]
 
+    # ── Data-driven path: fixes / next best steps from the runbook ─────
+    flow_hint = incident.suspected_systems[0] if incident.suspected_systems else ""
+    case = incident_kb.match_case(incident.title, incident.description, flow_hint)
+    if case is not None and case.root_cause_layer:
+        root_layer = case.root_cause_layer
+        root_doc = incident_kb.get_layer_doc(case, root_layer)
+        label = incident_kb.LAYER_LABELS.get(root_layer, root_layer)
+        next_actions = root_doc.next_actions if root_doc else []
+        actions: list[RemediationAction] = []
+        for i, step_text in enumerate(next_actions):
+            lowered = step_text.lower()
+            if any(w in lowered for w in ("rca", "publish", "notify", "escalate", "reconcile with")):
+                mcp_tool, risk = "publish_rca", "low"
+            elif any(w in lowered for w in ("delete", "clean", "re-run", "rerun", "reprocess")):
+                mcp_tool, risk = "rerun_ingestion", "medium"
+            else:
+                mcp_tool, risk = "reconcile_source", "medium"
+            actions.append(
+                RemediationAction(
+                    action_id=f"rem-{i + 1}",
+                    description=step_text,
+                    target_system=root_layer,
+                    mcp_tool=mcp_tool,
+                    risk_level=risk,
+                    requires_approval=True,
+                )
+            )
+        rationale = (
+            f"Root cause confirmed at the {label} (source) layer. Recommended fix and "
+            f"next best steps come from the runbook '{case.key}' Next Actions."
+        )
+        plan = RemediationPlan(actions=actions, rationale=rationale)
+        current_action = CurrentAction(
+            summary=(
+                f"Proposing {len(actions)} remediation step(s) for the {label} root cause. Approve to execute."
+                if actions else "No automatable remediation; manual source reconciliation required."
+            ),
+            action_type="propose_remediation",
+            requires_approval=bool(actions),
+        )
+        audit_entry = AuditEvent(
+            actor=ActorType.REMEDIATION_AGENT,
+            event_type="REMEDIATION_PROPOSED",
+            detail=f"{len(actions)} action(s) from runbook '{case.key}': {[a.description for a in actions]}. {rationale}",
+        )
+        return {
+            "remediation_plan": plan,
+            "status": IncidentStatus.AWAITING_REMEDIATION_APPROVAL if actions else IncidentStatus.RESOLVED,
+            "awaiting_remediation_approval": bool(actions),
+            "current_action": current_action,
+            "audit_trail": state.get("audit_trail", []) + [audit_entry],
+        }
+
+    # ── Fallback: LLM remediation for non-catalogued incidents ─────────
     user_prompt = f"""\
 root_cause_system: {correlation.root_cause_system}
 root_cause_summary: {correlation.root_cause_summary}

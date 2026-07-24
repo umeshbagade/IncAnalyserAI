@@ -65,10 +65,12 @@ export default function IncidentDashboard() {
     loadDashboard(true);
   }, [incId, loadDashboard]);
 
-  // Live polling while the investigation is running.
+  // Live polling while the investigation is running. Poll quickly so each
+  // streamed stage (Saturn -> Data Hub -> Ingestion) and its evidence appear
+  // in near real time rather than jumping straight to the final result.
   useEffect(() => {
     if (!isRunning) return;
-    const timer = setInterval(() => loadDashboard(false), 1500);
+    const timer = setInterval(() => loadDashboard(false), 700);
     return () => clearInterval(timer);
   }, [isRunning, loadDashboard]);
 
@@ -93,10 +95,12 @@ export default function IncidentDashboard() {
     setEventCount(0);
   };
 
-  // Evidence shown in the right panel is filtered client-side by the selected node.
+  // Evidence shown in the right panel. When a node is selected we scope to that
+  // node; otherwise we show the full live stream of evidence as it accumulates,
+  // so the user sees citations appear in real time without having to click.
   const nodeEvidence = selectedNode
     ? allEvidence.filter(e => e.node_id === selectedNode.id)
-    : [];
+    : allEvidence;
 
   if (loading || !incident) {
     return (
@@ -128,7 +132,7 @@ export default function IncidentDashboard() {
         {/* LEFT PANEL (30%) */}
         <div className="w-[30%] min-w-[300px] border-r border-[var(--border)] flex flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
-            <IncidentPanel incident={incident} selectedNode={selectedNode} />
+            <IncidentPanel incident={incident} selectedNode={selectedNode} isLive={isRunning} />
           </div>
           <div className="overflow-y-auto max-h-[40%]">
             {rcaResult && (

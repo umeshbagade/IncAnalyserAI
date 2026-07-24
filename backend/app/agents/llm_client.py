@@ -340,6 +340,51 @@ def _fallback_call_llm_structured(
                 remediation_needed=True,
             )
         else:
+            # Generic cascade: derive the root cause from the findings the
+            # correlator was actually given. The DAG walks from the reported
+            # symptom down through its dependencies via on_anomaly, so the LAST
+            # (deepest) system that reported an ANOMALY is the root cause; the
+            # earlier anomalies are downstream symptoms of it.
+            import re
+
+            anomalous_systems: list[str] = []
+            for line in user_prompt.splitlines():
+                if "status=ANOMALY" in line:
+                    m = re.search(r"system=(\S+)", line)
+                    if m:
+                        anomalous_systems.append(m.group(1))
+
+            if anomalous_systems:
+                root_cause = anomalous_systems[-1]
+                depth = len(anomalous_systems)
+                # sequence_order 0 = most upstream cause (the root); the earlier
+                # reported (shallower) symptoms get higher sequence numbers.
+                timeline = [
+                    CausalEvent(
+                        system=sys,
+                        description=(
+                            f"Root cause identified at {sys}"
+                            if sys == root_cause
+                            else f"Downstream symptom observed at {sys}, traced from {root_cause}"
+                        ),
+                        sequence_order=depth - 1 - idx,
+                        likely_root_cause=(sys == root_cause),
+                    )
+                    for idx, sys in enumerate(anomalous_systems)
+                ]
+                chain = " → ".join(anomalous_systems)
+                return CorrelationResult(
+                    timeline=timeline,
+                    root_cause_system=root_cause,
+                    root_cause_summary=(
+                        f"The issue propagated along {chain}. The anomalies at the "
+                        f"upstream layers are downstream symptoms; the actual root "
+                        f"cause is at the {root_cause} layer, the deepest dependency "
+                        f"that showed an anomaly."
+                    ),
+                    remediation_needed=True,
+                )
+
             return CorrelationResult(
                 timeline=[],
                 root_cause_system=None,

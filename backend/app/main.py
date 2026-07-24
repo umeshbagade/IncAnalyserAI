@@ -179,16 +179,11 @@ async def create_incident(req: CreateIncidentRequest):
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # Build default flow nodes for the given flowId
-    flow_nodes = [
-        {"id": "triage", "label": "Triage", "status": "pending", "description": "Initial triage and classification", "subSteps": []},
-        {"id": "saturn", "label": "Saturn", "status": "pending", "description": "Analyze Saturn service logs & metrics", "subSteps": []},
-        {"id": "v1", "label": "V1", "status": "pending", "description": "Check V1 service health & errors", "subSteps": []},
-        {"id": "tdh", "label": "TDH", "status": "pending", "description": "Inspect TDH data pipeline", "subSteps": []},
-        {"id": "ingestion", "label": "Ingestion", "status": "pending", "description": "Verify ingestion pipeline integrity", "subSteps": []},
-        {"id": "rca", "label": "Root Cause", "status": "pending", "description": "Synthesize findings into root cause", "subSteps": []},
-        {"id": "remediate", "label": "Remediation", "status": "pending", "description": "Generate remediation steps", "subSteps": []},
-    ]
+    # The DAG starts empty — real investigation layers (Saturn -> Data Hub ->
+    # Ingestion) are streamed in one at a time by the agent as each stage is
+    # actually reached, so the UI reveals them progressively instead of showing
+    # a static placeholder graph up front.
+    flow_nodes = []
 
     doc = {
         "id": inc_id,

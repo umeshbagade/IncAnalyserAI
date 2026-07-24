@@ -39,6 +39,7 @@ approving it first, enforced by `interrupt_before=["remediation_gate"]`.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -50,6 +51,7 @@ from .planner_agent import planner_node
 from .remediation_agent import remediation_node
 from .specialist_agent import specialist_node
 from .triage_agent import triage_node
+from .knowledge import incident_kb
 from .knowledge.mcp_tools import execute_remediation_action
 from .models import (
     ActorType,
@@ -67,6 +69,13 @@ from .models import (
 )
 
 MAX_INVESTIGATION_HOPS = 8  # safety cap against a malformed/cyclic DAG
+
+# Human-visible pacing: the graph super-steps complete in well under a second,
+# which is too fast for a person to follow the live investigation. We pause
+# briefly after each step that changes the visible DAG (or streams new
+# evidence) so the UI reveals Saturn -> Data Hub -> Ingestion one stage at a
+# time. Tunable via the STEP_PACING_SECONDS env var (0 disables pacing).
+STEP_PACING_SECONDS = float(os.getenv("STEP_PACING_SECONDS", "1.4"))
 
 
 def _supervisor_update_node(state: IncidentGraphState) -> dict:
@@ -307,6 +316,24 @@ def _translate_state_to_updates(state: dict) -> dict:
     finding_by_step = {f.step_id: f for f in findings}
     current_step_id = state.get("current_step_id")
     investigation_done = state.get("status") in (IncidentStatus.RESOLVED, IncidentStatus.ESCALATED)
+    # The correlator decides which single layer is the actual root cause. Until
+    # correlation runs, no layer is flagged as the culprit — every checked layer
+    # is shown as "completed" (symptom observed and traced onward), not "error".
+    # Only the confirmed root-cause layer is rendered as the issue.
+    correlation = state.get("correlation")
+    root_cause_system = correlation.root_cause_system if correlation else None
+    # Determine the expected endpoint/root-cause layer up-front from the matched
+    # runbook case. The terminal (source) layer must never flash "completed"
+    # (green success) before the correlator flips it to "error" — instead it
+    # stays "active" (still analysing) until the failure is confirmed, so it
+    # transitions active -> error, never success -> error.
+    _incident_for_root = state.get("incident")
+    expected_root_layer = None
+    if _incident_for_root is not None:
+        _hint = _incident_for_root.suspected_systems[0] if _incident_for_root.suspected_systems else ""
+        _root_case = incident_kb.match_case(_incident_for_root.title, _incident_for_root.description, _hint)
+        if _root_case is not None:
+            expected_root_layer = _root_case.root_cause_layer
     system_label_map = {
         "saturn": "Saturn",
         "datahub": "Data Hub",
@@ -318,11 +345,23 @@ def _translate_state_to_updates(state: dict) -> dict:
         nodes = []
         for step in runbook:
             finding = finding_by_step.get(step.step_id)
+            is_root_cause = root_cause_system is not None and step.system == root_cause_system
+            is_expected_root = (
+                expected_root_layer is not None and step.system == expected_root_layer
+            )
             # Determine per-node status for the live DAG.
-            if finding:
-                # ANOMALY -> error (something failed here); NORMAL/INCONCLUSIVE
-                # both mean the step was actually checked -> completed.
-                step_status = "error" if finding.status == FindingStatus.ANOMALY else "completed"
+            if is_root_cause:
+                # The one layer the correlator pinned as the actual root cause.
+                step_status = "error"
+            elif finding and is_expected_root:
+                # Known source/endpoint layer analysed but not yet confirmed by
+                # the correlator — keep it visibly "active" so it never shows a
+                # green success state before turning red.
+                step_status = "active"
+            elif finding:
+                # Checked (symptom may have been observed and traced onward, or
+                # the layer was clean) — either way it's not the culprit.
+                step_status = "completed"
             elif step.step_id == current_step_id:
                 step_status = "active"  # specialist is working on this now
             elif investigation_done:
@@ -333,8 +372,16 @@ def _translate_state_to_updates(state: dict) -> dict:
             label = system_label_map.get(step.system, step.system.replace("_", " ").title())
 
             # Keep the node concise; the full detail lives in Evidence & Citations.
-            if finding and finding.anomalies:
+            if is_root_cause and finding and finding.anomalies:
+                # Root cause: surface the actual anomalies as errors.
                 sub = [(a[:60], "error") for a in finding.anomalies[:3]]
+            elif finding and is_expected_root:
+                # Endpoint layer under final confirmation.
+                sub = [("Analyzing source layer — confirming root cause…", "active")]
+            elif finding and finding.anomalies:
+                # Checked layer where the symptom was visible but it is not the
+                # root cause — show it was traced onward, not flagged as broken.
+                sub = [("Discrepancy detected — traced upstream to source layer", "completed")]
             elif step_status == "completed":
                 sub = [("Checks passed — no anomaly", "completed")]
             elif step_status == "active":
@@ -356,32 +403,91 @@ def _translate_state_to_updates(state: dict) -> dict:
             })
 
         if nodes:
+            # Progressive reveal: only surface layers the investigation has
+            # actually reached (active / completed / error / skipped). Future
+            # layers that are still "pending" are withheld so the UI shows one
+            # stage at a time — Saturn first, then Data Hub once Saturn is done,
+            # then Ingestion — instead of rendering the whole DAG up front.
+            visible_nodes = [n for n in nodes if n["status"] != "pending"]
             flow_id = state.get("incident").incident_id if state.get("incident") else "investigation"
             updates["flow.id"] = flow_id
             updates["flow.name"] = f"Investigation for {flow_id}"
-            updates["flow.nodes"] = nodes
+            updates["flow.nodes"] = visible_nodes
 
     # ── Evidence ───────────────────────────────────────────────────────
     evidence_list = state.get("evidence", [])
-    if evidence_list:
-        mapped_evidence = []
-        for ev in evidence_list:
-            # Reflect whether the phase this evidence belongs to passed or failed.
-            f = finding_by_step.get(ev.step_id)
-            if f and f.status == FindingStatus.ANOMALY:
-                ev_status = "failed"
-            elif f and f.status == FindingStatus.INCONCLUSIVE:
-                ev_status = "warning"
-            else:
-                ev_status = "success"
-            mapped_evidence.append({
-                "id": ev.evidence_id,
-                "type": "tool_call",
-                "content": ev.description[:60],
-                "status": ev_status,
-                "details": f"system={ev.system} step={ev.step_id} source={ev.source}: {ev.description}",
-                "node_id": ev.system,
-            })
+    mapped_evidence = []
+    for ev in evidence_list:
+        # Reflect whether the phase this evidence belongs to passed or failed.
+        # Only the confirmed root-cause layer is marked "failed"; anomalies on
+        # traversed-but-not-culprit layers are shown as warnings (symptom seen).
+        f = finding_by_step.get(ev.step_id)
+        if root_cause_system and ev.system == root_cause_system:
+            ev_status = "failed"
+        elif f and f.status == FindingStatus.ANOMALY:
+            ev_status = "warning"
+        elif f and f.status == FindingStatus.INCONCLUSIVE:
+            ev_status = "warning"
+        else:
+            ev_status = "success"
+        mapped_evidence.append({
+            "id": ev.evidence_id,
+            "type": "tool_call",
+            "content": ev.description[:60],
+            "status": ev_status,
+            "details": f"system={ev.system} step={ev.step_id} source={ev.source}: {ev.description}",
+            "node_id": ev.system,
+        })
+
+    # Enrich with runbook-backed evidence (root-cause fix + similar incidents)
+    # drawn from the curated knowledge base when this incident matches a case.
+    # These are gated on investigation progress so they stream in as the
+    # relevant stage is reached — the root-cause candidates/fixes only surface
+    # once the Ingestion (source) layer has actually been analysed, and similar
+    # incidents only after correlation has confirmed the root cause. This keeps
+    # the Evidence panel updating one group at a time instead of all at once.
+    incident_obj = state.get("incident")
+    if incident_obj is not None:
+        analyzed_systems = {
+            step.system for step in runbook if finding_by_step.get(step.step_id)
+        }
+        flow_hint = incident_obj.suspected_systems[0] if incident_obj.suspected_systems else ""
+        case = incident_kb.match_case(incident_obj.title, incident_obj.description, flow_hint)
+        if case is not None:
+            root_layer = case.root_cause_layer
+            root_reached = root_layer in analyzed_systems or root_cause_system is not None
+            root_doc = incident_kb.get_layer_doc(case, root_layer) if root_layer else None
+            if root_doc and root_reached:
+                for j, cause in enumerate(root_doc.common_causes):
+                    mapped_evidence.append({
+                        "id": f"rc-cause-{j}",
+                        "type": "runbook",
+                        "content": f"Root cause candidate: {cause[:50]}",
+                        "status": "failed",
+                        "details": f"Runbook '{case.key}' common cause at {root_layer}: {cause}",
+                        "node_id": root_layer,
+                    })
+                for j, action in enumerate(root_doc.next_actions):
+                    mapped_evidence.append({
+                        "id": f"rc-fix-{j}",
+                        "type": "runbook",
+                        "content": f"Fix / next step: {action[:50]}",
+                        "status": "success",
+                        "details": f"Runbook '{case.key}' next action at {root_layer}: {action}",
+                        "node_id": root_layer,
+                    })
+            if root_cause_system is not None:
+                for j, sim in enumerate(incident_kb.find_similar(case)):
+                    mapped_evidence.append({
+                        "id": f"sim-{j}",
+                        "type": "similar_incident",
+                        "content": f"{sim.domain}/{sim.folder}: {sim.symptom[:45]}",
+                        "status": "warning",
+                        "details": f"Similar past incident '{sim.key}' ({sim.domain}/{sim.folder}): {sim.symptom}",
+                        "node_id": case.root_cause_layer,
+                    })
+
+    if mapped_evidence:
         updates["flow.evidence"] = mapped_evidence
 
     # ── Hypotheses → causal chain ──────────────────────────────────────
@@ -400,7 +506,8 @@ def _translate_state_to_updates(state: dict) -> dict:
         updates["flow.rca.confidence"] = round(confidence, 2)
         if correlation.root_cause_system:
             updates["flow.rca.causalChain"] = [
-                f"{e.system}: {e.description}" for e in correlation.timeline
+                f"{incident_kb.LAYER_LABELS.get(e.system, e.system)}: {e.description}"
+                for e in correlation.timeline
             ]
 
     # ── Remediation plan → next actions ───────────────────────────────
@@ -525,6 +632,13 @@ async def start_investigation(inc_id: str, doc: dict):
             updates["investigation.runId"] = run_id
             updates["investigation.createdAt"] = created_at
             await collection.update_one({"id": inc_id}, {"$set": updates})
+            # Pace visible transitions so the frontend can render each stage as
+            # it happens (Saturn running -> done -> Data Hub -> Ingestion ->
+            # fail) instead of jumping straight to the final graph.
+            if STEP_PACING_SECONDS > 0 and (
+                "flow.nodes" in updates or "flow.evidence" in updates
+            ):
+                await asyncio.sleep(STEP_PACING_SECONDS)
     except Exception as e:
         print(f"❌ Investigation failed for {inc_id}: {e}")
         import traceback

@@ -194,6 +194,70 @@ body {
   box-shadow: 0 0 20px rgba(239, 68, 68, 0.15), 0 0 40px rgba(239, 68, 68, 0.05);
 }
 
+/* ── DAG node entrance + evidence card entrance ─────────────────────── */
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-node-in {
+  animation: node-in 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.animate-card-in {
+  animation: card-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Animated dashed flow along the DAG connector while a stage is active. */
+@keyframes connector-flow {
+  to { background-position: 0 -16px; }
+}
+
+.connector-flow {
+  background-image: linear-gradient(
+    to bottom,
+    currentColor 0,
+    currentColor 6px,
+    transparent 6px,
+    transparent 12px
+  );
+  background-size: 100% 12px;
+  animation: connector-flow 0.6s linear infinite;
+}
+
+/* ── Typewriter caret for streamed triage summary ──────────────────── */
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typewriter-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caret-blink 0.9s step-end infinite;
+}
+
 input, textarea, select {
   background: var(--surface);
   border: 1px solid var(--border);
