@@ -28,6 +28,7 @@ export interface ApiIncidentDetail {
   flow: string;
   timestamp: string;
   duration: string;
+  createdAt?: string;
   originalText: string;
   triageSummary: string;
   entities: Array<{ name: string; type: string; confidence: number }>;

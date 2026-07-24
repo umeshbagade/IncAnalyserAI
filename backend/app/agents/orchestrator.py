@@ -72,10 +72,15 @@ MAX_INVESTIGATION_HOPS = 8  # safety cap against a malformed/cyclic DAG
 
 # Human-visible pacing: the graph super-steps complete in well under a second,
 # which is too fast for a person to follow the live investigation. We pause
-# briefly after each step that changes the visible DAG (or streams new
-# evidence) so the UI reveals Saturn -> Data Hub -> Ingestion one stage at a
-# time. Tunable via the STEP_PACING_SECONDS env var (0 disables pacing).
-STEP_PACING_SECONDS = float(os.getenv("STEP_PACING_SECONDS", "1.4"))
+# after each step that changes the visible DAG (or streams new evidence) so the
+# UI reveals Saturn -> Data Hub -> Ingestion one stage at a time. Tunable via
+# the STEP_PACING_SECONDS env var (0 disables pacing).
+STEP_PACING_SECONDS = float(os.getenv("STEP_PACING_SECONDS", "3.0"))
+
+# Initial "thinking" delay before the first layer is revealed, so the dashboard
+# spends a beat in triage/planning instead of popping the first stage instantly.
+# Tunable via the INITIAL_INVESTIGATION_DELAY_SECONDS env var.
+INITIAL_INVESTIGATION_DELAY_SECONDS = float(os.getenv("INITIAL_INVESTIGATION_DELAY_SECONDS", "2.5"))
 
 
 def _supervisor_update_node(state: IncidentGraphState) -> dict:
@@ -306,7 +311,7 @@ def _translate_state_to_updates(state: dict) -> dict:
         if triage.impacted_business_flow:
             entities.append({"name": triage.impacted_business_flow, "type": "workflow", "confidence": triage.confidence})
         for s in triage.symptoms[:3]:
-            entities.append({"name": s[:40], "type": "symptom", "confidence": 0.7})
+            entities.append({"name": s, "type": "symptom", "confidence": 0.7})
         if entities:
             updates["entities"] = entities
 
@@ -373,8 +378,14 @@ def _translate_state_to_updates(state: dict) -> dict:
 
             # Keep the node concise; the full detail lives in Evidence & Citations.
             if is_root_cause and finding and finding.anomalies:
-                # Root cause: surface the actual anomalies as errors.
-                sub = [(a[:60], "error") for a in finding.anomalies[:3]]
+                # Root cause: surface the anomalies as errors, but keep each line
+                # short so it fits on a single row in the DAG node. The node
+                # already reads "<layer> / ERROR", so we drop the redundant
+                # "ROOT CAUSE at <layer>:" prefix and clip overly long causes.
+                def _shorten(a: str) -> str:
+                    text = a.split(": ", 1)[1] if a.startswith("ROOT CAUSE at ") and ": " in a else a
+                    return text if len(text) <= 52 else text[:51].rstrip() + "…"
+                sub = [(_shorten(a), "error") for a in finding.anomalies[:3]]
             elif finding and is_expected_root:
                 # Endpoint layer under final confirmation.
                 sub = [("Analyzing source layer — confirming root cause…", "active")]
@@ -516,7 +527,7 @@ def _translate_state_to_updates(state: dict) -> dict:
         updates["flow.nextActions"] = [
             {
                 "id": a.action_id,
-                "label": a.description[:40],
+                "label": a.description,
                 "action": a.mcp_tool,
                 "category": "investigate" if a.risk_level == "high" else "rerun",
             }
@@ -623,6 +634,7 @@ async def start_investigation(inc_id: str, doc: dict):
 
     try:
         stream = graph.stream(initial_state, config, stream_mode="values")
+        first_visible_reveal = True
         while True:
             snapshot = await asyncio.to_thread(_advance, stream)
             if snapshot is _DONE:
@@ -632,12 +644,22 @@ async def start_investigation(inc_id: str, doc: dict):
             updates["investigation.runId"] = run_id
             updates["investigation.createdAt"] = created_at
             await collection.update_one({"id": inc_id}, {"$set": updates})
-            # Pace visible transitions so the frontend can render each stage as
-            # it happens (Saturn running -> done -> Data Hub -> Ingestion ->
-            # fail) instead of jumping straight to the final graph.
-            if STEP_PACING_SECONDS > 0 and (
-                "flow.nodes" in updates or "flow.evidence" in updates
-            ):
+            # Pace only the *searching* phase of each stage. We hold while a
+            # layer is "active" (loading/searching takes time), but let
+            # snapshots that merely mark a stage completed/failed pass straight
+            # through — so as soon as one stage finishes the next stage starts
+            # immediately, with the delay living inside the active phase rather
+            # than between stages.
+            flow_nodes = updates.get("flow.nodes")
+            stage_searching = isinstance(flow_nodes, list) and any(
+                n.get("status") == "active" for n in flow_nodes
+            )
+            if STEP_PACING_SECONDS > 0 and stage_searching:
+                # Hold on the triage/planning phase before the very first layer
+                # starts searching, so the investigation doesn't reveal instantly.
+                if first_visible_reveal and INITIAL_INVESTIGATION_DELAY_SECONDS > 0:
+                    await asyncio.sleep(INITIAL_INVESTIGATION_DELAY_SECONDS)
+                first_visible_reveal = False
                 await asyncio.sleep(STEP_PACING_SECONDS)
     except Exception as e:
         print(f"❌ Investigation failed for {inc_id}: {e}")

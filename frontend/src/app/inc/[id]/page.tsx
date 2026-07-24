@@ -124,13 +124,14 @@ export default function IncidentDashboard() {
         flow={incident.flow}
         severity={incident.severity}
         duration={incident.duration}
+        createdAt={incident.createdAt}
         onBack={() => router.push('/')}
       />
 
       {/* Main Dashboard Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT PANEL (30%) */}
-        <div className="w-[30%] min-w-[300px] border-r border-[var(--border)] flex flex-col overflow-hidden">
+        {/* LEFT PANEL (35%) */}
+        <div className="w-[35%] min-w-[360px] border-r border-[var(--border)] flex flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <IncidentPanel incident={incident} selectedNode={selectedNode} isLive={isRunning} />
           </div>
@@ -141,8 +142,8 @@ export default function IncidentDashboard() {
           </div>
         </div>
 
-        {/* CENTER PANEL (45%) */}
-        <div className="w-[45%] min-w-[400px] flex flex-col overflow-hidden">
+        {/* CENTER PANEL (40%) */}
+        <div className="w-[40%] min-w-[340px] flex flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <div className="h-full flex flex-col overflow-hidden">
               <div className="px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -160,7 +161,13 @@ export default function IncidentDashboard() {
                     )}
                   </h2>
                   <span className="text-[10px] text-[var(--muted)] bg-[var(--surface-light)] px-2 py-1 rounded">
-                    Phase: {flowNodes.find(n => n.status === 'active')?.label || flowNodes[0]?.label || 'SATURN'}
+                    Phase: {
+                      selectedNode?.label
+                      || flowNodes.find(n => n.status === 'active')?.label
+                      || flowNodes.find(n => n.status === 'error')?.label
+                      || flowNodes[flowNodes.length - 1]?.label
+                      || 'SATURN'
+                    }
                   </span>
                 </div>
               </div>

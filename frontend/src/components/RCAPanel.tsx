@@ -78,11 +78,11 @@ export default function RCAPanel({ rcaResult, bestNextActions }: RCAPanelProps) 
           {bestNextActions.map((action) => (
             <button
               key={action.id}
-              className={`flex items-center gap-2 px-3 py-2 rounded border text-xs transition-all ${actionColors[action.category]}`}
+              className={`flex items-start gap-2 px-3 py-2 rounded border text-xs transition-all ${actionColors[action.category]}`}
             >
-              {actionIcons[action.category]}
-              <span className="flex-1 text-left">{action.label}</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <span className="shrink-0 mt-0.5">{actionIcons[action.category]}</span>
+              <span className="flex-1 min-w-0 text-left whitespace-normal break-words leading-relaxed">{action.label}</span>
+              <svg className="shrink-0 mt-0.5" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
               </svg>
             </button>

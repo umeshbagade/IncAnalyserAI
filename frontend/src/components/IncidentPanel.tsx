@@ -146,7 +146,7 @@ export default function IncidentPanel({ incident, selectedNode, isLive = false }
                 {incident.entities.map((entity, idx) => (
                   <span
                     key={idx}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--surface-light)] border border-[var(--border)] text-[var(--accent)]"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--surface-light)] border border-[var(--border)] text-[var(--accent)] max-w-full whitespace-normal break-words text-left"
                     title={`${entity.type} (${(entity.confidence * 100).toFixed(0)}%)`}
                   >
                     {entity.name}

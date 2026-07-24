@@ -6,6 +6,7 @@ export interface Incident {
   flow: string;
   timestamp: string;
   duration: string;
+  createdAt?: string;
   originalText: string;
   triageSummary: string;
   entities: Entity[];

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Zap, Activity, Clock, TriangleAlert, Settings, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Zap, Activity, Clock, Settings, ChevronDown } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 interface HeaderProps {
@@ -8,15 +8,24 @@ interface HeaderProps {
   flow: string;
   severity: 'HIGH' | 'MEDIUM' | 'LOW';
   duration: string;
+  createdAt?: string;
   onBack?: () => void;
 }
 
-export default function Header({ incId, flow, severity, duration, onBack }: HeaderProps) {
+export default function Header({ incId, flow, severity, createdAt, onBack }: HeaderProps) {
   const severityColors = {
     HIGH: 'status-high',
     MEDIUM: 'status-medium',
     LOW: 'status-low',
   };
+
+  // Show the time the incident was logged/created (not an elapsed counter).
+  const loggedAt = (() => {
+    if (!createdAt) return '--:--:--';
+    const d = new Date(createdAt);
+    if (isNaN(d.getTime())) return '--:--:--';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  })();
 
   return (
     <header className="h-14 bg-[var(--surface)] border-b border-[var(--border)] flex items-center justify-between px-4 shrink-0">
@@ -50,15 +59,11 @@ export default function Header({ incId, flow, severity, duration, onBack }: Head
         </div>
         <div className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
           <Clock size={12} />
-          <span>0 {duration}</span>
+          <span>{loggedAt}</span>
         </div>
       </div>
       <div className="flex items-center gap-2">
         <ThemeToggle />
-        <button className="btn btn-ghost text-xs">
-          <TriangleAlert size={12} />
-          Escalate
-        </button>
         <button className="btn btn-ghost text-xs">
           <Settings size={12} />
         </button>

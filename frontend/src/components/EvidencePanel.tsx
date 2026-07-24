@@ -95,6 +95,10 @@ function EvidenceCard({
   typeLabels: Record<string, string>;
   onFeedback: (evidenceId: string, feedback: 'useful' | 'wrong') => void;
 }) {
+  // Only ever show a binary success/failed state — a symptom seen on a
+  // traversed-but-not-culprit layer is treated as a passed check, so the
+  // evidence never displays an ambiguous "warning".
+  const displayStatus = evidence.status === 'warning' ? 'success' : evidence.status;
   return (
     <div className="card animate-card-in transition-all duration-300 hover:border-[var(--accent)]/40 hover:shadow-[0_0_16px_rgba(59,130,246,0.08)]">
       <div className="card-body p-3">
@@ -106,9 +110,9 @@ function EvidenceCard({
             </span>
           </div>
           <div className="flex items-center gap-1">
-            {statusIcons[evidence.status]}
-            <span className={`text-[10px] ${statusColors[evidence.status]}`}>
-              {evidence.status}
+            {statusIcons[displayStatus]}
+            <span className={`text-[10px] ${statusColors[displayStatus]}`}>
+              {displayStatus}
             </span>
           </div>
         </div>

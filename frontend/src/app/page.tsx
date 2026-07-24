@@ -76,9 +76,6 @@ export default function HomePage() {
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <h2 className="text-xl font-bold text-[var(--foreground)]">Incident Analysis Dashboard</h2>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30">
-              BETA
-            </span>
           </div>
           <p className="text-xs text-[var(--muted)]">
             AI-powered root cause analysis for production incidents. Search an incident or select from the list below.

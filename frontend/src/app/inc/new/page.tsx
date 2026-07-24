@@ -145,10 +145,9 @@ export default function NewInvestigationPage() {
                 disabled={submitting}
                 className="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] focus:outline-none focus:border-[var(--accent)] px-4 py-2.5"
               >
-                <option value="SATURN">SATURN (Standard Analysis)</option>
-                <option value="MERCURY">MERCURY (Quick Triage)</option>
-                <option value="ORION">ORION (Deep Dive)</option>
-                <option value="VEGA">VEGA (Security Focus)</option>
+                <option value="SATURN">SATURN (Report Layer)</option>
+                <option value="DATAHUB">DATA HUB (Snapshot Layer)</option>
+                <option value="INGESTION">INGESTION (Source Layer)</option>
               </select>
             </div>
           </div>

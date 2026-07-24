@@ -4,7 +4,7 @@
 
 id: data_process_failure
 system: data_hub
-symptom: "Feed flagged, snapshot not approved, quality checks failed, snapshot not arrived" 
+symptom: "FSB report generation failure traced to Data Hub: the Monthly snapshot pipeline FAILED before completion and published an incomplete/partial snapshot that Saturn consumed — snapshot_status=FAILED, approval_status=REJECTED. This is the ROOT CAUSE; PE Ingestion staging is complete and healthy (ingestion_status=SUCCESS)."
 severity: high
 
 ## Checks
@@ -20,23 +20,21 @@ severity: high
 
 ## Common Causes
 
-- Late or partial upstream feed (from pe ingestion) 
-- Reference data missing or out of date
+- Data Hub Monthly snapshot pipeline FAILED before completion, publishing an incomplete/partial snapshot that Saturn then consumed (ROOT CAUSE).
+- Snapshot job aborted / timed out mid-write, so fewer rows were persisted than were present in the complete PE staging table.
+- Completeness gate flagged the partial snapshot and set approval_status = REJECTED, but the incomplete snapshot had already been consumed downstream.
 - Threshold misconfiguration or overly strict validation rules
 - Data schema mismatch with expected structure
 - Duplicate records or unexpected null values
-- Calculation logic errors in derived fields
-- Reference data quality degradation
 - Manual hold or approval workflow blocked
 
 ## Next Actions
 
-- If cause=late feed → Drill into [ingestion.md](ingestion.md) for upstream investigation 
-- If cause=ref data → Notify ref-data team and validate reference data feeds
-- If cause=quality threshold → Review QA rule thresholds and adjust if needed 
-- If cause=calculation error → Inspect Saturn transformation logic in [saturn.md](saturn.md) 
-- If cause=manual hold → Check dh.approval_queue for blocking user/reason 
-- If resolved → Escalate issue to Saturn pipeline for downstream impact assessment
+- ROOT CAUSE IDENTIFIED at Data Hub — the Monthly snapshot pipeline failed and published an incomplete snapshot. Investigation STOPS here.
+- Do NOT escalate to PE Ingestion — staging is complete and ingestion_status = SUCCESS for the incident COB, so there is nothing to investigate upstream.
+- Re-run the Data Hub snapshot pipeline for the affected feed + COB, then re-approve once the completeness gate passes.
+- Regenerate the Saturn / Tableau FSB report from the corrected, fully-approved snapshot.
+- If cause=quality threshold → Review QA rule thresholds and adjust if needed
 
 ## Data Quality Rule Categories
 
@@ -75,4 +73,4 @@ severity: high
 
 **Previous Step:** [saturn.md](saturn.md) - Start from Saturn calculation/report failure triage 
 
-**Next Step:** If issue is upstream feed-related, proceed to [ingestion.md](ingestion.md)
+**End Point:** Data Hub is the root-cause layer for this incident — the Monthly snapshot pipeline failed and published an incomplete snapshot. Investigation stops here; PE Ingestion is proven healthy and is NOT investigated.

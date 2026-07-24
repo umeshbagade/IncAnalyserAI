@@ -103,9 +103,9 @@ export default function FlowDAG({ nodes, onNodeSelect, selectedNodeId }: FlowDAG
                 {node.subSteps.length > 0 && (
                   <div className="mt-3 space-y-1.5">
                     {node.subSteps.map((step) => (
-                      <div key={step.id} className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${subStepStatusColors[step.status]}`} />
-                        <span className={`text-[10px] transition-colors duration-500 ${step.status === 'completed' ? 'text-[var(--success)] line-through opacity-60' : step.status === 'active' ? 'text-[var(--accent)]' : step.status === 'error' ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
+                      <div key={step.id} className="flex items-start gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1 transition-colors duration-500 ${subStepStatusColors[step.status]}`} />
+                        <span className={`text-[10px] flex-1 min-w-0 break-words leading-relaxed transition-colors duration-500 ${step.status === 'completed' ? 'text-[var(--success)] line-through opacity-60' : step.status === 'active' ? 'text-[var(--accent)]' : step.status === 'error' ? 'text-[var(--danger)]' : 'text-[var(--muted)]'}`}>
                           {step.label}
                         </span>
                       </div>

@@ -508,6 +508,7 @@ async def get_incident_dashboard(inc_id: str):
         "flow": doc.get("flowId", "unknown"),
         "timestamp": doc.get("timestamp", ""),
         "duration": doc.get("duration", "00:00:00"),
+        "createdAt": doc.get("createdAt", ""),
         "originalText": doc.get("originalText", ""),
         "triageSummary": doc.get("triageSummary", ""),
         "entities": doc.get("entities", []),
