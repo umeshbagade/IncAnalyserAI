@@ -9,8 +9,11 @@ Uses RAG over past incidents to help classify by similarity.
 from __future__ import annotations
 
 from . import llm_client
-from .models import ActorType, AuditEvent, IncidentGraphState, IncidentStatus, TriageResult
+from .models import ActorType, AuditEvent, IncidentGraphState, IncidentStatus, Severity, TriageResult
+from .knowledge import incident_kb
 from .knowledge.topology_store import get_all_systems, search_similar_incidents
+
+_SEVERITY_MAP = {"critical": Severity.SEV1, "high": Severity.SEV2, "medium": Severity.SEV3, "low": Severity.SEV4}
 
 SYSTEM_PROMPT = """\
 You are the Triage Agent inside an incident-diagnosis system for a
@@ -37,6 +40,44 @@ known systems, and any similar past incidents found via retrieval, produce:
 
 def triage_node(state: IncidentGraphState) -> dict:
     incident = state["incident"]
+
+    # ── Data-driven path: a curated runbook case matches this incident ──
+    flow_hint = incident.suspected_systems[0] if incident.suspected_systems else ""
+    case = incident_kb.match_case(incident.title, incident.description, flow_hint)
+    if case is not None:
+        saturn_doc = incident_kb.get_layer_doc(case, "saturn")
+        symptoms = [case.symptom] if case.symptom else []
+        if saturn_doc and saturn_doc.checks:
+            symptoms = [case.symptom or saturn_doc.symptom] + saturn_doc.checks[:2]
+        similar = [f"{s.domain}/{s.folder}: {s.symptom}" for s in incident_kb.find_similar(case)]
+        result = TriageResult(
+            impacted_business_flow=f"{case.domain} reporting ({case.key})",
+            severity=_SEVERITY_MAP.get(case.severity.strip().lower(), Severity.SEV2),
+            entry_point_service="saturn",
+            symptoms=[s for s in symptoms if s],
+            confidence=0.92,
+            rationale=(
+                f"Symptom surfaced in the {case.domain} Saturn report: {case.symptom}. "
+                f"Matched curated runbook '{case.key}'. Drilling saturn → datahub → "
+                f"ingestion to trace the discrepancy to its source."
+            ),
+            similar_past_incidents=similar,
+        )
+        audit_entry = AuditEvent(
+            actor=ActorType.TRIAGE_AGENT,
+            event_type="TRIAGE_COMPLETE",
+            detail=(
+                f"flow={result.impacted_business_flow} severity={result.severity.value} "
+                f"entry_point=saturn matched_case={case.key} confidence={result.confidence:.2f}"
+            ),
+        )
+        return {
+            "triage": result,
+            "status": IncidentStatus.PLANNING,
+            "audit_trail": state.get("audit_trail", []) + [audit_entry],
+        }
+
+    # ── Fallback: LLM triage for non-catalogued incidents ──────────────
     known_systems = get_all_systems()
     systems_listing = "\n".join(f"- {s.system_id}: {s.name} — {s.description}" for s in known_systems)
 

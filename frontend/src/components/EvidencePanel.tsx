@@ -50,23 +50,21 @@ export default function EvidencePanel({ evidence, selectedNode, onFeedback }: Ev
         <p className="text-[10px] text-[var(--muted)] mt-1">
           {selectedNode
             ? `Showing evidence for: ${selectedNode.label}`
-            : 'Click a flow node to see context-specific evidence'}
+            : 'Live evidence stream — updates in real time as the investigation runs'}
         </p>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {!selectedNode && (
+        {evidence.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <BookOpen size={24} className="text-[var(--muted)] mb-2 opacity-30" />
-            <p className="text-xs text-[var(--muted)]">Select a flow node to view evidence</p>
+            <p className="text-xs text-[var(--muted)]">
+              {selectedNode
+                ? 'No evidence available for this node'
+                : 'Listening for evidence… citations will appear here as agents run'}
+            </p>
           </div>
         )}
-        {selectedNode && evidence.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <FileText size={24} className="text-[var(--muted)] mb-2 opacity-30" />
-            <p className="text-xs text-[var(--muted)]">No evidence available for this node</p>
-          </div>
-        )}
-        {selectedNode && evidence.map((item) => (
+        {evidence.map((item) => (
           <EvidenceCard
             key={item.id}
             evidence={item}
@@ -98,7 +96,7 @@ function EvidenceCard({
   onFeedback: (evidenceId: string, feedback: 'useful' | 'wrong') => void;
 }) {
   return (
-    <div className="card animate-slide-in">
+    <div className="card animate-card-in transition-all duration-300 hover:border-[var(--accent)]/40 hover:shadow-[0_0_16px_rgba(59,130,246,0.08)]">
       <div className="card-body p-3">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">

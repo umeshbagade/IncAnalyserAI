@@ -1,21 +1,60 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Incident, FlowNode } from '@/types';
 import { FileText, ListTree, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface IncidentPanelProps {
   incident: Incident;
   selectedNode: FlowNode | null;
+  /** True only while a fresh investigation is actively running. The triage
+   *  summary types out on a live run; opening an existing incident shows it
+   *  immediately with no animation. */
+  isLive?: boolean;
 }
 
-export default function IncidentPanel({ incident, selectedNode }: IncidentPanelProps) {
+/**
+ * Types out `text` one character at a time when `enabled` is true. Re-runs only
+ * when the text value changes, so the triage summary animates once as it first
+ * streams in during a live investigation. When `enabled` is false the full text
+ * is shown immediately (e.g. reopening an already-analysed incident).
+ */
+function useTypewriter(text: string, enabled: boolean, speed = 16) {
+  const [output, setOutput] = useState('');
+  const [done, setDone] = useState(true);
+
+  useEffect(() => {
+    if (!text || !enabled) {
+      setOutput(text);
+      setDone(true);
+      return;
+    }
+    setOutput('');
+    setDone(false);
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setOutput(text.slice(0, i));
+      if (i >= text.length) {
+        clearInterval(id);
+        setDone(true);
+      }
+    }, speed);
+    return () => clearInterval(id);
+  }, [text, enabled, speed]);
+
+  return { output, done };
+}
+
+export default function IncidentPanel({ incident, selectedNode, isLive = false }: IncidentPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     original: true,
     triage: true,
     entities: true,
     timeline: true,
   });
+
+  const { output: typedTriage, done: triageDone } = useTypewriter(incident.triageSummary || '', isLive);
 
   const toggleSection = (key: string) => {
     setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -79,7 +118,10 @@ export default function IncidentPanel({ incident, selectedNode }: IncidentPanelP
           </button>
           {expandedSections.triage && (
             <div className="px-4 py-3 border-b border-[var(--border)]">
-              <p className="text-xs text-[var(--foreground)] leading-relaxed">{incident.triageSummary}</p>
+              <p className="text-xs text-[var(--foreground)] leading-relaxed">
+                {typedTriage}
+                {!triageDone && <span className="typewriter-caret" aria-hidden="true" />}
+              </p>
             </div>
           )}
         </div>

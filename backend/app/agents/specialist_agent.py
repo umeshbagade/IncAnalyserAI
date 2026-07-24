@@ -21,8 +21,9 @@ per-system tool access differs enough to warrant it.
 from __future__ import annotations
 
 from . import llm_client
-from .models import ActorType, AuditEvent, Finding, IncidentGraphState, PlanStep
-from .knowledge.mcp_tools import log_query, metric_query, run_diagnostic
+from .models import ActorType, AuditEvent, Finding, FindingStatus, IncidentGraphState, PlanStep
+from .knowledge import incident_kb
+from .knowledge.mcp_tools import investigate_layer, log_query, metric_query, run_diagnostic
 from .knowledge.topology_store import get_system_knowledge_base
 
 SYSTEM_PROMPT = """\
@@ -50,7 +51,45 @@ def specialist_node(state: IncidentGraphState) -> dict:
     runbook = state["runbook"]
     step_id = state["current_step_id"]
     step: PlanStep = next(s for s in runbook if s.step_id == step_id)
+    incident = state["incident"]
 
+    # ── Data-driven path: real MCP sweep against the matched runbook ────
+    flow_hint = incident.suspected_systems[0] if incident.suspected_systems else ""
+    case = incident_kb.match_case(incident.title, incident.description, flow_hint)
+    if case is not None and step.system in case.layers:
+        sweep = investigate_layer(case, step.system)
+        label = sweep["label"]
+        if sweep["is_root_cause"]:
+            anomalies = [f"ROOT CAUSE at {label}: {c}" for c in sweep["common_causes"]] or [
+                f"ROOT CAUSE at {label}: {sweep['symptom']}"
+            ]
+        else:
+            anomalies = [f"Discrepancy at {label}: {sweep['symptom']}"] + [
+                f"Check flagged: {c}" for c in sweep["checks"][:2]
+            ]
+        evidence_refs = [f"{label} check — {c}" for c in sweep["checks"]] or [f"{label}: {sweep['symptom']}"]
+        finding = Finding(
+            step_id=step.step_id,
+            system=step.system,
+            status=FindingStatus.ANOMALY,
+            anomalies=anomalies,
+            evidence_refs=evidence_refs,
+            suggested_next=sweep["next_actions"],
+        )
+        audit_entry = AuditEvent(
+            actor=ActorType.SPECIALIST_AGENT,
+            event_type="FINDING_REPORTED",
+            detail=(
+                f"step_id={step.step_id} system={step.system} status=ANOMALY "
+                f"root_cause={sweep['is_root_cause']} anomalies={anomalies[:1]}"
+            ),
+        )
+        return {
+            "findings": state.get("findings", []) + [finding],
+            "audit_trail": state.get("audit_trail", []) + [audit_entry],
+        }
+
+    # ── Fallback: LLM specialist for non-catalogued incidents ──────────
     logs = log_query(step.system, step.action)
     metrics = metric_query(step.system, "error_rate")
     diagnostic = run_diagnostic(step.system, "health_check")
