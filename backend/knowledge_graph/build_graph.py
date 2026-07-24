@@ -5,6 +5,7 @@ into a NetworkX directed graph for traversal and analysis.
 """
 
 import os
+import json
 import yaml
 import networkx as nx
 
@@ -293,5 +294,3 @@ if __name__ == "__main__":
     print("Graph Summary:")
     print(json.dumps(kg.get_domain_summary(), indent=2))
     print("=" * 60)
-    import json
-

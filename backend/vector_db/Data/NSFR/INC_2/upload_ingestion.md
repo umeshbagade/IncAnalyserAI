@@ -1,19 +1,25 @@
 ---
-id: Stratplan_BCS
+id: NSFR_Business_date_Alteration
 system: upload_ingestion
-symptom: "BCS pull failed, historical snapshot not available in source"
-severity: high
+symptom: "LCR data business date altered for some records"
+severity: High
 ---
 
 # Checks
-- Query BCS source count for requested date + variant: `SELECT COUNT(*) FROM bcs_source WHERE business_date=<Date> AND variant_name=<name>`
-- Query available source dates: `SELECT DISTINCT business_date FROM bcs_data ORDER BY business_date DESC LIMIT 12`
-- Inspect `lnd_cfg_bcs_variant_filters` validity window for requested COB
+- Check whether the business date is altered in the uploaded LCR data for the given COB.
+- Check the date format in the source file before upload.
+- Verify that the date column data type matches the landing table schema:
+  `SELECT data_type FROM information_schema.columns WHERE table_name='lcr_landing' AND column_name='business_da
 
-# Common causes
-- Historical month-end data not present in BCS source
-- Check for the data type matches for the source data and landing table. If the data type does not match, it can cause the ingestion to fail.
+# Common Causes
+- Date format mismatch between source file and landing table (e.g., YYYY-MM-DD vs DD-MM-YYYY)
+- Source file contains dates in wrong timezone causing conversion issues
+- Incompatible date parsing during Spark ingestion (missing date format specification)
+- Source data contains mixed date formats within same file
 
-# Next actions
-- If cause=no source data -> use nearest available month-end and confirm business acceptance
-- If cause=data type mismatch -> correct the data type in the landing table or source data to match and rerun the ingestion
+# Next Actions
+- If cause=date format mismatch in source -> correct the date format in source file or add format specification
+- If cause=timezone issue -> verify TZ handling in Spark configuration and adjust UTC offset
+- If cause=parsing error -> add explicit date_format parameter to Spark read operation: `.option("dateFormat", "y
+- If cause=mixed formats -> pre-process source to standardize format before ingestion
+- After fix -> re-run ingestion for affected records and validate date values match COB

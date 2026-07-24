@@ -1,19 +1,17 @@
 ---
-id: Stratplan_BCS
+id: NSFR_data_duplicate
 system: upload_ingestion
-symptom: "BCS pull failed, historical snapshot not available in source"
-severity: high
+symptom: "NSFR data duplication in both AG and GROUP reports"
+severity: High
 ---
 
 # Checks
-- Query BCS source count for requested date + variant: `SELECT COUNT(*) FROM bcs_source WHERE business_date=<Date> AND variant_name=<name>`
-- Query available source dates: `SELECT DISTINCT business_date FROM bcs_data ORDER BY business_date DESC LIMIT 12`
-- Inspect `lnd_cfg_bcs_variant_filters` validity window for requested COB
+- Check whether data is duplicated in the staging table for the given business date:
+  `SELECT COUNT(*) FROM nsfr_staging WHERE business_date = <COB>;` -> compare with the expected count
 
-# Common causes
-- Historical month-end data not present in BCS source
-- Check for the data type matches for the source data and landing table. If the data type does not match, it can cause the ingestion to fail.
+# Common Causes
+- The ingestion job was re-run for the same business date without cleaning the staging table.
 
-# Next actions
-- If cause=no source data -> use nearest available month-end and confirm business acceptance
-- If cause=data type mismatch -> correct the data type in the landing table or source data to match and rerun the ingestion
+# Next Actions
+- If the staging table was not cleaned, delete duplicate records for the affected business date and
+- If the ingestion job was re-run, ensure the staging table is cleaned before re-running ingestion f

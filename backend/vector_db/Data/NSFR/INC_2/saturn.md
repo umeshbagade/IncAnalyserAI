@@ -1,25 +1,16 @@
 ---
-id: Stratplan_BCS
+id: NSFR_Business_date_Alteration
 system: saturn
-symptom: "BCS pull failed, historical snapshot not available in source"
-severity: high
+symptom: "LCR data business date altered for some records"
+severity: High
 ---
 
 # Checks
-- Check the BCS jobs are running and not failing due to any other issues
-- Check for the job handle created for the requested date and variant in the BCS job history table
-- Verify UBR/FSI config aligns with requested historical period
-- Check BCS retention window with source owner
+- Check whether loading and appending into the main table completed correctly for the given COB.
+- Check the date format stored in the main table.
 
-# Common causes
-- Historical month-end data not present in BCS source
-- Job got failed due to some other issue and did not complete successfully
-- BCS API returning incorrect row count in metadata
-- Variant/process not active for requested historical date
-- Config dates valid but source data absent
+# Common Causes
+- Date format mismatch between the source and the main table, leading to incorrect business dates being st
 
-# Next actions
-- If cause=network interruption -> implement retry and backoff logic review
-- If cause=incomplete transmission -> check HTTP content-length header
-- If cause=JSON parsing -> validate JSON structure against expected schema
-- If cause=encoding -> verify gzip decompression and charset handling
+# Next Actions
+- If there is a date format mismatch, correct the date format in the source or main table and re-run ingest
