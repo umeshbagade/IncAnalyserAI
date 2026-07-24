@@ -52,7 +52,7 @@ export default function LiveEventStream({ events, isConnected, eventCount, onCle
           )}
         </div>
       </div>
-      <div className="h-28 overflow-y-auto px-4 py-2 space-y-1">
+      <div className="h-56 min-h-[6rem] max-h-[70vh] resize-y overflow-y-auto px-4 py-2 space-y-1">
         {events.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="flex items-center gap-2 text-[var(--muted)]">

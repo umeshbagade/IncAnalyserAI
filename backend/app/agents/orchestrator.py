@@ -304,14 +304,24 @@ def _translate_state_to_updates(state: dict) -> dict:
     triage = state.get("triage")
     if triage:
         updates["triageSummary"] = triage.rationale
-        # Map entities from triage
+        # Map entities from triage. Keep them short (1–2 words) and few (3–4)
+        # so the Entities chips stay compact — full symptom sentences live in
+        # the Triage Summary / RCA panels, not here.
+        def _short(text: str, max_words: int = 2) -> str:
+            # Drop any parenthetical qualifier and clip to a couple of words.
+            base = text.split("(")[0].strip()
+            return " ".join(base.split()[:max_words])
+
         entities = []
         if triage.entry_point_service:
-            entities.append({"name": triage.entry_point_service, "type": "system", "confidence": triage.confidence})
+            entities.append({"name": _short(triage.entry_point_service), "type": "system", "confidence": triage.confidence})
         if triage.impacted_business_flow:
-            entities.append({"name": triage.impacted_business_flow, "type": "workflow", "confidence": triage.confidence})
-        for s in triage.symptoms[:3]:
-            entities.append({"name": s, "type": "symptom", "confidence": 0.7})
+            entities.append({"name": _short(triage.impacted_business_flow), "type": "workflow", "confidence": triage.confidence})
+        sev = getattr(triage.severity, "value", str(triage.severity))
+        entities.append({"name": str(sev).title(), "type": "severity", "confidence": triage.confidence})
+        # De-duplicate while preserving order, and cap at 4 short entities.
+        seen = set()
+        entities = [e for e in entities if e["name"] and not (e["name"].lower() in seen or seen.add(e["name"].lower()))][:4]
         if entities:
             updates["entities"] = entities
 

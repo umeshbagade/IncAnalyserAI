@@ -19,7 +19,7 @@ interface IncidentPanelProps {
  * streams in during a live investigation. When `enabled` is false the full text
  * is shown immediately (e.g. reopening an already-analysed incident).
  */
-function useTypewriter(text: string, enabled: boolean, speed = 16) {
+function useTypewriter(text: string, enabled: boolean, speed = 9) {
   const [output, setOutput] = useState('');
   const [done, setDone] = useState(true);
 

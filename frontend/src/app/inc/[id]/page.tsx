@@ -32,6 +32,20 @@ export default function IncidentDashboard() {
   const [loading, setLoading] = useState(true);
   const [investigationStatus, setInvestigationStatus] = useState<string>('idle');
 
+  // Adjustable side-panel widths (px). Defaults mirror the original layout
+  // (left 35%, right 25%, center 40%); set from the viewport on mount so the
+  // starting proportions match what they were before the panels were resizable.
+  const [leftWidth, setLeftWidth] = useState(420);
+  const [rightWidth, setRightWidth] = useState(300);
+
+  // Adjustable height (px) for the Root Cause Analysis panel in the left column.
+  const [rcaHeight, setRcaHeight] = useState(420);
+
+  useEffect(() => {
+    setLeftWidth(Math.round(window.innerWidth * 0.35));
+    setRightWidth(Math.round(window.innerWidth * 0.25));
+  }, []);
+
   const isRunning = investigationStatus === 'running';
 
   useEffect(() => {
@@ -95,6 +109,53 @@ export default function IncidentDashboard() {
     setEventCount(0);
   };
 
+  // Drag-to-resize for the left/right side panels. On mousedown we track the
+  // pointer on the document until release, clamping each panel to a sensible
+  // min/max so the center panel always keeps room.
+  const startResize = useCallback((side: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startLeft = leftWidth;
+    const startRight = rightWidth;
+    const onMove = (ev: MouseEvent) => {
+      if (side === 'left') {
+        setLeftWidth(Math.min(Math.max(startLeft + (ev.clientX - startX), 280), 700));
+      } else {
+        setRightWidth(Math.min(Math.max(startRight - (ev.clientX - startX), 240), 640));
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [leftWidth, rightWidth]);
+
+  // Drag-to-resize the Root Cause Analysis panel height (vertical).
+  const startRcaResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = rcaHeight;
+    const onMove = (ev: MouseEvent) => {
+      setRcaHeight(Math.min(Math.max(startH + (startY - ev.clientY), 140), Math.round(window.innerHeight * 0.75)));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+  }, [rcaHeight]);
+
   // Evidence shown in the right panel. When a node is selected we scope to that
   // node; otherwise we show the full live stream of evidence as it accumulates,
   // so the user sees citations appear in real time without having to click.
@@ -130,20 +191,35 @@ export default function IncidentDashboard() {
 
       {/* Main Dashboard Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT PANEL (35%) */}
-        <div className="w-[35%] min-w-[360px] border-r border-[var(--border)] flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
+        {/* LEFT PANEL (resizable) */}
+        <div style={{ width: leftWidth }} className="shrink-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <IncidentPanel incident={incident} selectedNode={selectedNode} isLive={isRunning} />
           </div>
-          <div className="overflow-y-auto max-h-[40%]">
-            {rcaResult && (
-              <RCAPanel rcaResult={rcaResult} bestNextActions={bestNextActions} />
-            )}
-          </div>
+          {rcaResult && (
+            <>
+              {/* RCA vertical resize handle */}
+              <div
+                onMouseDown={startRcaResize}
+                title="Drag to resize"
+                className="h-1.5 shrink-0 cursor-row-resize bg-[var(--border)] hover:bg-[var(--accent)] transition-colors"
+              />
+              <div style={{ height: rcaHeight }} className="shrink-0 overflow-y-auto">
+                <RCAPanel rcaResult={rcaResult} bestNextActions={bestNextActions} />
+              </div>
+            </>
+          )}
         </div>
 
-        {/* CENTER PANEL (40%) */}
-        <div className="w-[40%] min-w-[340px] flex flex-col overflow-hidden">
+        {/* LEFT resize handle */}
+        <div
+          onMouseDown={startResize('left')}
+          title="Drag to resize"
+          className="w-1.5 shrink-0 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)] transition-colors"
+        />
+
+        {/* CENTER PANEL (flexes to fill) */}
+        <div className="flex-1 min-w-[320px] flex flex-col overflow-hidden">
           <div className="flex-1 overflow-hidden">
             <div className="h-full flex flex-col overflow-hidden">
               <div className="px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -186,8 +262,15 @@ export default function IncidentDashboard() {
           />
         </div>
 
-        {/* RIGHT PANEL (25%) */}
-        <div className="w-[25%] min-w-[250px] border-l border-[var(--border)] overflow-hidden">
+        {/* RIGHT resize handle */}
+        <div
+          onMouseDown={startResize('right')}
+          title="Drag to resize"
+          className="w-1.5 shrink-0 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)] transition-colors"
+        />
+
+        {/* RIGHT PANEL (resizable) */}
+        <div style={{ width: rightWidth }} className="shrink-0 overflow-hidden">
           <EvidencePanel
             evidence={nodeEvidence}
             selectedNode={selectedNode}
